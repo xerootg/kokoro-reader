@@ -1,7 +1,8 @@
-name: Android Release
+name: Build and sign APK
 
 on:
   push:
+    branches: [main]
     tags:
       - 'v*'
   workflow_dispatch:
@@ -27,7 +28,7 @@ jobs:
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
+          java-version: '21'
           distribution: 'temurin'
 
       - name: Setup Android NDK
@@ -77,7 +78,7 @@ jobs:
         id: determine_bundle
         run: |
           BUILD_BUNDLE="false"
-          if [[ "${{ github.event_name }}" == "push" ]]; then
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
             BUILD_BUNDLE="true"
           elif [[ "${{ github.event.inputs.build_bundle }}" == "true" ]]; then
             BUILD_BUNDLE="true"
@@ -124,15 +125,15 @@ jobs:
 
       - name: Rename Signed Assets
         run: |
-          mv ${{ steps.sign_apk.outputs.signedReleaseFile }} app/build/outputs/apk/release/Supertonic-${{ steps.clean_ref.outputs.clean_ref_name }}.apk
+          mv ${{ steps.sign_apk.outputs.signedReleaseFile }} app/build/outputs/apk/release/KokoroReader-${{ steps.clean_ref.outputs.clean_ref_name }}.apk
           if [[ "${{ steps.determine_bundle.outputs.build_bundle }}" == "true" ]]; then
-            mv ${{ steps.sign_bundle.outputs.signedReleaseFile }} app/build/outputs/bundle/release/Supertonic-${{ steps.clean_ref.outputs.clean_ref_name }}.aab
+            mv ${{ steps.sign_bundle.outputs.signedReleaseFile }} app/build/outputs/bundle/release/KokoroReader-${{ steps.clean_ref.outputs.clean_ref_name }}.aab
           fi
 
       - name: Upload Test Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Supertonic-Build-${{ steps.clean_ref.outputs.clean_ref_name }}
+          name: KokoroReader-Build-${{ steps.clean_ref.outputs.clean_ref_name }}
           path: |
             app/build/outputs/apk/release/*.apk
             app/build/outputs/bundle/release/*.aab
@@ -143,6 +144,6 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
-            app/build/outputs/apk/release/Supertonic-${{ steps.clean_ref.outputs.clean_ref_name }}.apk
-            app/build/outputs/bundle/release/Supertonic-${{ steps.clean_ref.outputs.clean_ref_name }}.aab
+            app/build/outputs/apk/release/KokoroReader-${{ steps.clean_ref.outputs.clean_ref_name }}.apk
+            app/build/outputs/bundle/release/KokoroReader-${{ steps.clean_ref.outputs.clean_ref_name }}.aab
           fail_on_unmatched_files: false
