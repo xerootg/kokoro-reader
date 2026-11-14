@@ -55,6 +55,7 @@ object AudioCache {
     fun get(key: String): ByteArray? {
         val f = File(dir ?: return null, "$key.pcm")
         if (!f.isFile) { misses++; return null }
+        if (f.length() < 2 || f.length() % 2L != 0L) { f.delete(); misses++; return null }   // torn write (power loss)
         return try {
             val b = f.readBytes()
             f.setLastModified(System.currentTimeMillis())
@@ -65,7 +66,10 @@ object AudioCache {
     fun put(key: String, pcm: ByteArray) {
         val d = dir ?: return
         try {
-            val tmp = File(d, "$key.tmp"); tmp.writeBytes(pcm)
+            if (pcm.size < 2) return
+            val tmp = File(d, "$key.tmp")
+            java.io.FileOutputStream(tmp).use { o -> o.write(pcm); o.fd.sync() }   // survive a crash or power loss
+            if (tmp.length() != pcm.size.toLong()) { tmp.delete(); return }
             val f = File(d, "$key.pcm"); tmp.renameTo(f)
             if (usedBytes >= 0) usedBytes += pcm.size
             if (usedBytes < 0 || usedBytes > limitBytes) evict()

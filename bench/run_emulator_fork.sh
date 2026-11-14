@@ -35,3 +35,4 @@ echo "--- fork"; $ADB logcat -d -s SupertonicTTS KokoroEngine KokoroNative Asset
 echo "--- crashes"; $ADB logcat -d -b crash | tail -15 | cut -c1-220
 $ADB exec-out run-as $BENCH cat files/tts_out.wav > "$OUT/fork_tts_out.wav" 2>/dev/null || true
 ls -la "$OUT/fork_tts_out.wav" | awk '{print $5, $9}'
+$ADB shell sync    # the emulator is killed without a clean shutdown; flush the guest's files (the app's cache among them)
