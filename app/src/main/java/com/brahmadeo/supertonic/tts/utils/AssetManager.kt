@@ -7,6 +7,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
+import com.brahmadeo.supertonic.tts.KokoroEngine
 import java.net.HttpURLConnection
 import java.net.URI
 import kotlin.time.Duration.Companion.milliseconds
@@ -22,7 +23,9 @@ object AssetManager {
     }
 
     private const val TAG = "AssetManager"
-    private const val BASE_URL_V1 = "https://huggingface.co/Supertone/supertonic/resolve/main"
+    // In this fork the English slot ("v1") holds Kokoro-82M packaged for Google's MediaPipe task
+    // (one .litertlm bundle with every voice inside) instead of the English-only Supertonic model.
+    private const val BASE_URL_V1 = "https://huggingface.co/litert-community/Kokoro-82M/resolve/main"
     private const val BASE_URL_V2 = "https://huggingface.co/Supertone/supertonic-2/resolve/main"
     private const val BASE_URL_V3 = "https://huggingface.co/Supertone/supertonic-3/resolve/main"
     private const val CONNECT_TIMEOUT_MS = 15_000
@@ -31,17 +34,32 @@ object AssetManager {
     private const val BUFFER_SIZE = 65_536
 
 
-    private val V1_FILES = listOf(
-        "onnx/duration_predictor.onnx",
-        "onnx/text_encoder.onnx",
-        "onnx/vector_estimator.onnx",
-        "onnx/vocoder.onnx",
-        "onnx/tts.json",
-        "onnx/unicode_indexer.json",
-        // V1 voices
-        "voice_styles/M1.json", "voice_styles/M2.json", "voice_styles/M3.json", "voice_styles/M4.json", "voice_styles/M5.json",
-        "voice_styles/F1.json", "voice_styles/F2.json", "voice_styles/F3.json", "voice_styles/F4.json", "voice_styles/F5.json"
+    private val V1_FILES = listOf(KokoroEngine.MODEL_FILE)
+
+    /**
+     * The app lists voices by looking for `<version>/voice_styles/<name>.json` and loads a model from
+     * `<version>/onnx`. Kokoro keeps its voices inside the model bundle, so these are empty stand-ins
+     * named after Kokoro voice ids; KokoroEngine reads only the file name.
+     */
+    private val KOKORO_VOICES = listOf(
+        "am_michael", "am_adam", "am_eric", "am_liam", "am_onyx", "am_puck", "am_fenrir", "am_echo",
+        "af_heart", "af_bella", "af_nicole", "af_sarah", "af_sky",
+        "bm_george", "bm_daniel", "bm_fable", "bm_lewis", "bf_emma", "bf_alice", "bf_isabella", "bf_lily",
+        "em_alex", "ef_dora",
     )
+
+    private fun ensureKokoroLayout(baseDir: File) {
+        try {
+            File(baseDir, "onnx").mkdirs()
+            val voiceDir = File(baseDir, "voice_styles").apply { mkdirs() }
+            for (v in KOKORO_VOICES) {
+                val f = File(voiceDir, "$v.json")
+                if (!f.exists()) f.writeText("{}")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not prepare Kokoro voice list: ${e.message}")
+        }
+    }
 
     private val V2_FILES = listOf(
         "onnx/duration_predictor.onnx",
@@ -75,10 +93,12 @@ object AssetManager {
         if (!baseDir.exists()) return false
         // Marker file ensures the entire batch was completed successfully
         if (!File(baseDir, ".ready").exists()) return false
-        return files.all { 
+        val ok = files.all { 
             val f = File(baseDir, it)
             f.exists() && f.length() > 0 
         }
+        if (ok && version == "v1") ensureKokoroLayout(baseDir)
+        return ok
     }
 
     suspend fun downloadV1(context: Context, onProgress: (String, Float, Long, Long) -> Unit) {

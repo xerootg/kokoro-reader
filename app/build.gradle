@@ -128,7 +128,7 @@ android {
 
     defaultConfig {
         applicationId = "com.brahmadeo.supertonic.tts"
-        minSdk = 24
+        minSdk = 26
         targetSdk = 37
         versionCode = 25
         versionName = "3.3.1"
@@ -152,6 +152,11 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Installs beside the published Supertonic app instead of replacing it.
+            applicationIdSuffix = ".kokoro"
+            versionNameSuffix = "-kokoro"
+        }
         release {
             minifyEnabled = true
             shrinkResources = true
@@ -235,6 +240,9 @@ dependencies {
 
     // ONNX Runtime (double implementation/configuration)
     implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.31.0'
+
+    // Kokoro-82M through Google's MediaPipe text-to-speech task (Apache-2.0). Needs minSdk 26.
+    implementation 'com.google.mediapipe:tasks-audio:1.2.3'
     onnxRuntime 'com.microsoft.onnxruntime:onnxruntime-android:1.31.0'
 
     // Readium Toolkit

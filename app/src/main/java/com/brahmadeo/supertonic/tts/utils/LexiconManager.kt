@@ -81,6 +81,14 @@ object LexiconManager {
         }
     }
 
+    /** A rule whose replacement is written between slashes, e.g. `/mondɾaɣˈon/`, pins Kokoro phonemes. */
+    fun isPhonemeRule(item: LexiconItem): Boolean {
+        val r = item.replacement.trim()
+        return r.length > 2 && r.startsWith("/") && r.endsWith("/")
+    }
+
+    fun phonemeRules(): List<LexiconItem> = cachedRules.filter { it.term.isNotBlank() && isPhonemeRule(it) }
+
     fun apply(text: String): String {
         // If not loaded, we can't apply rules safely without context to load them.
         // Consumers must ensure load(context) is called at app start.
@@ -90,6 +98,9 @@ object LexiconManager {
         
         for (item in cachedRules) {
             if (item.term.isBlank()) continue
+            // Rules that pin phonemes (replacement written as /.../) are applied by KokoroEngine as
+            // inline markup, after text normalisation; inserting them here as text would be read aloud.
+            if (isPhonemeRule(item)) continue
             
             val flags = if (item.ignoreCase) Pattern.CASE_INSENSITIVE else 0
             

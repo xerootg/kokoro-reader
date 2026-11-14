@@ -33,14 +33,27 @@ object SupertonicTTS {
     private external fun reset(ptr: Long)
     private external fun nativeChunkText(text: String, lang: String): String
 
+    /** True while the Kokoro engine (Google's MediaPipe task) is serving requests in place of the native one. */
+    @Volatile private var kokoroActive = false
+
     @Synchronized
     fun isInitialized(modelPath: String): Boolean {
+        if (KokoroEngine.isKokoroModelDir(modelPath)) return kokoroActive && KokoroEngine.isInitialized(modelPath)
         if (nativePtr == 0L || currentModelPath != modelPath) return false
         return getSocClass(nativePtr) != -1
     }
 
     @Synchronized
     fun initialize(modelPath: String, libPath: String, ortThreads: Int = 4, xnnThreads: Int = 1): Boolean {
+        if (KokoroEngine.isKokoroModelDir(modelPath)) {
+            if (nativePtr != 0L) release()
+            val ok = KokoroEngine.initialize(modelPath)
+            kokoroActive = ok
+            currentModelPath = if (ok) modelPath else null
+            Log.i("SupertonicTTS", "Kokoro engine " + (if (ok) "initialized" else "FAILED") + " for $modelPath")
+            return ok
+        }
+        if (kokoroActive) { KokoroEngine.release(); kokoroActive = false }
         if (nativePtr != 0L) {
             // Health check: Can we still talk to the engine?
             if (getSocClass(nativePtr) != -1) {
@@ -122,6 +135,7 @@ object SupertonicTTS {
         listener: ProgressListener? = null,
         sibilanceMode: Int = this.sibilanceMode
     ): ByteArray? {
+        if (kokoroActive) return KokoroEngine.synthesize(text, stylePath, speed)
         if (nativePtr == 0L) {
             Log.e("SupertonicTTS", "Engine not initialized")
             return null
@@ -143,18 +157,21 @@ object SupertonicTTS {
 
     @Synchronized
     fun getSoC(): Int {
+        if (kokoroActive) return 0
         if (nativePtr == 0L) return -1
         return getSocClass(nativePtr)
     }
 
     @Synchronized
     fun getAudioSampleRate(): Int {
+        if (kokoroActive) return KokoroEngine.SAMPLE_RATE
         if (nativePtr == 0L) return 44100
         return getSampleRate(nativePtr)
     }
 
     @Synchronized
     fun release() {
+        if (kokoroActive) { KokoroEngine.release(); kokoroActive = false }
         val ptrToRelease = nativePtr
         if (ptrToRelease != 0L) {
             Log.i("SupertonicTTS", "Releasing engine: $ptrToRelease")
