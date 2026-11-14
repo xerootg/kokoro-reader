@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Needed since Android 11 to see other apps' text-to-speech engines (the "tts" mode). -->
+    <queries>
+        <intent><action android:name="android.intent.action.TTS_SERVICE" /></intent>
+    </queries>
     <application android:label="Kokoro Bench" android:largeHeap="true">
         <!-- Lets the app load the phone's public vendor GPU / EdgeTPU libraries if the runtime asks for them. -->
         <uses-native-library android:name="libOpenCL.so" android:required="false" />

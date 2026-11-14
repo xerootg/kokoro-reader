@@ -3,6 +3,9 @@ package dev.milagro.kokorobench
 import android.app.Activity
 import android.os.Bundle
 import android.os.Debug
+import android.speech.tts.TextToSpeech as SystemTts
+import android.speech.tts.UtteranceProgressListener
+import java.util.Locale
 import android.util.Log
 import android.widget.ScrollView
 import android.widget.TextView
@@ -34,6 +37,41 @@ class MainActivity : Activity() {
     private val markup = "Joe [Mondragón](/mondɾaɣˈon/) and Sheriff [Bernabé](/beɾnaβˈe/) [Montoya](/montˈoʝa/) " +
         "drove out to [Milagro](/milˈaɣɾo/) before the [trucha](/tɾˈuʧa/) stopped biting."
 
+    // Original test text for the "tts" mode: lexicon names, a semicolon and a quoted line.
+    private val engineTest = "Joe Mondragón and Sheriff Bernabé Montoya drove out to Milagro before the trucha stopped biting; " +
+        "nobody in the plaza looked up. \"Que no,\" said Amarante Córdova, \"that water belongs to the acequia.\""
+
+    /**
+     * Speak through Android's standard text-to-speech API using a named engine package, and save the
+     * result to tts_out.wav.  This exercises another app's speech service end to end.
+     *   adb shell am start -n dev.milagro.kokorobench/.MainActivity -e mode tts -e engine <package>
+     */
+    private fun systemTts(engine: String, text: String) {
+        say("TTS-START engine=$engine chars=${text.length}")
+        var tts: SystemTts? = null
+        val t0 = System.nanoTime()
+        tts = SystemTts(this, { status ->
+            if (status != SystemTts.SUCCESS) { say("DONE error=tts-init-status-$status"); return@SystemTts }
+            val t = tts ?: return@SystemTts
+            say("TTS-READY ms=${(System.nanoTime() - t0) / 1_000_000} defaultEngine=${t.defaultEngine} engines=${t.engines.joinToString { it.name }}")
+            t.setLanguage(Locale.US)
+            val out = File(filesDir, "tts_out.wav")
+            val start = System.nanoTime()
+            t.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                override fun onStart(id: String?) { say("TTS-SPEAKING") }
+                override fun onDone(id: String?) {
+                    say("TTS-FILE bytes=${out.length()} synth_ms=${(System.nanoTime() - start) / 1_000_000}")
+                    say("DONE ok"); t.shutdown()
+                }
+                @Deprecated("Deprecated in Java")
+                override fun onError(id: String?) { say("DONE error=tts-utterance"); t.shutdown() }
+                override fun onError(id: String?, code: Int) { say("DONE error=tts-utterance-$code"); t.shutdown() }
+            })
+            val r = t.synthesizeToFile(text, Bundle(), out, "bench")
+            if (r != SystemTts.SUCCESS) say("DONE error=synthesizeToFile-$r")
+        }, engine.ifEmpty { null })
+    }
+
     private fun say(s: String) {
         Log.i(tag, s)
         runOnUiThread { view.append(s + "\n") }
@@ -47,7 +85,11 @@ class MainActivity : Activity() {
         val delegate = (intent.getStringExtra("delegate") ?: "cpu").lowercase()
         val voice = intent.getStringExtra("voice") ?: "am_michael"
         val runs = intent.getIntExtra("runs", 3)
-        Thread { bench(model, delegate, voice, runs) }.start()
+        if (intent.getStringExtra("mode") == "tts") {
+            systemTts(intent.getStringExtra("engine") ?: "", intent.getStringExtra("text") ?: engineTest)
+        } else {
+            Thread { bench(model, delegate, voice, runs) }.start()
+        }
     }
 
     private fun bench(model: String, delegate: String, voice: String, runs: Int) {
