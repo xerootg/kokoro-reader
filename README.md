@@ -34,7 +34,7 @@ Requirements: JDK 17 or 21 (`JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 ./grad
 
 Install to one profile only on a phone with a work profile: `adb install --user 0 -r app/build/outputs/apk/debug/app-debug.apk`.
 
-The Kokoro model is downloaded by the app on first use (about 295 MB). To place it by hand, copy
+The app downloads its models on first use: Google's stock bundle from Hugging Face and the 512-token bundle from this repository's `models-v1` release (about 295 MB each). To place them by hand in a debug build, copy
 `kokoro_int8_gpu_fp16.litertlm` (or the CPU file) into the app's `files/v1/` directory;
 `bench/phone_install.sh` does that over adb, together with the lexicon and a book.
 

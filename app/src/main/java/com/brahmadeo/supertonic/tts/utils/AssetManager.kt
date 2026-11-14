@@ -34,7 +34,12 @@ object AssetManager {
     private const val BUFFER_SIZE = 65_536
 
 
-    private val V1_FILES = listOf(KokoroEngine.GPU_MODEL_FILE)
+    // The stock bundle (MediaPipe task, 128-token bucket) plus the 512-token re-export that lets the direct
+    // binding speak whole sentences; the second comes from this repository's `models-v1` release (tools/export).
+    private val V1_FILES = listOf(KokoroEngine.GPU_MODEL_FILE, KokoroEngine.LONG_MODEL_GPU)
+    private val V1_URLS = mapOf(
+        KokoroEngine.LONG_MODEL_GPU to "https://github.com/xerootg/kokoro-reader/releases/download/models-v1/${KokoroEngine.LONG_MODEL_GPU}",
+    )
 
     /**
      * The app lists voices by looking for `<version>/voice_styles/<name>.json` and loads a model from
@@ -102,7 +107,7 @@ object AssetManager {
     }
 
     suspend fun downloadV1(context: Context, onProgress: (String, Float, Long, Long) -> Unit) {
-        downloadVersion(context, "v1", BASE_URL_V1, V1_FILES, onProgress)
+        downloadVersion(context, "v1", BASE_URL_V1, V1_FILES, onProgress, V1_URLS)
     }
 
     suspend fun downloadV2(context: Context, onProgress: (String, Float, Long, Long) -> Unit) {
@@ -235,7 +240,8 @@ object AssetManager {
         version: String,
         baseUrl: String,
         files: List<String>,
-        onProgress: (String, Float, Long, Long) -> Unit
+        onProgress: (String, Float, Long, Long) -> Unit,
+        urls: Map<String, String> = emptyMap(),      // files that do not live under baseUrl
     ) {
         withContext(Dispatchers.IO) {
             val baseDir = File(context.filesDir, version)
@@ -259,7 +265,7 @@ object AssetManager {
                 if (targetFile.exists()) {
                     totalBytes += targetFile.length()
                 } else {
-                    val len = probeFileSize("$baseUrl/$relativePath")
+                    val len = probeFileSize(urls[relativePath] ?: "$baseUrl/$relativePath")
                     if (len > 0) totalBytes += len
                 }
             }
@@ -282,7 +288,7 @@ object AssetManager {
 
                 targetFile.parentFile?.let { if (!it.exists()) it.mkdirs() }
 
-                val url = "$baseUrl/$relativePath"
+                val url = urls[relativePath] ?: "$baseUrl/$relativePath"
                 val fileName = targetFile.name
                 Log.d(TAG, "Downloading $url to ${targetFile.absolutePath}")
                 onProgress(
