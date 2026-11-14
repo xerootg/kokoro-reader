@@ -61,6 +61,7 @@ class PlaybackActivity : ComponentActivity() {
     private var currentText = ""
     private var currentVoicePath = ""
     private var currentSpeed = 1.0f
+    private val speedState = androidx.compose.runtime.mutableFloatStateOf(1.0f)
     private var currentSteps = 5
     private var currentLang = "en"
     private var currentBookPath: String? = null
@@ -227,7 +228,10 @@ class PlaybackActivity : ComponentActivity() {
                                 Toast.makeText(this@PlaybackActivity, "Audio saving cancelled", Toast.LENGTH_SHORT).show()
                             }
                         },
-                        onSleepTimerClick = { handleSleepTimerClick() }
+                        onSleepTimerClick = { handleSleepTimerClick() },
+                        speed = speedState.floatValue,
+                        onSpeedChange = { s -> currentSpeed = s; speedState.floatValue = s; retune() },
+                        onGapsChanged = { retune() }
                     )
 
                     if (isLoadingNextState.value) {
@@ -260,7 +264,7 @@ class PlaybackActivity : ComponentActivity() {
             val prefs = getSharedPreferences("SupertonicPrefs", MODE_PRIVATE)
             currentText = prefs.getString("last_text", "") ?: ""
             currentVoicePath = prefs.getString("last_voice_path", "") ?: ""
-            currentSpeed = prefs.getFloat("last_speed", 1.0f)
+            currentSpeed = prefs.getFloat("last_speed", 1.0f); speedState.floatValue = currentSpeed
             currentSteps = prefs.getInt("last_steps", 5)
             currentLang = prefs.getString("last_lang", "en") ?: "en"
             currentIndexState.intValue = prefs.getInt("last_index", 0)
@@ -270,7 +274,7 @@ class PlaybackActivity : ComponentActivity() {
         } else {
             currentText = intent.getStringExtra(EXTRA_TEXT) ?: ""
             currentVoicePath = intent.getStringExtra(EXTRA_VOICE_PATH) ?: ""
-            currentSpeed = intent.getFloatExtra(EXTRA_SPEED, 1.0f)
+            currentSpeed = intent.getFloatExtra(EXTRA_SPEED, 1.0f); speedState.floatValue = currentSpeed
             currentSteps = intent.getIntExtra(EXTRA_STEPS, 5)
             currentLang = intent.getStringExtra(EXTRA_LANG) ?: "en"
             currentBookPath = intent.getStringExtra(EXTRA_BOOK_PATH)
@@ -295,7 +299,7 @@ class PlaybackActivity : ComponentActivity() {
         if (newText.isNotEmpty() && newText != currentText) {
             currentText = newText
             currentVoicePath = prefs.getString("last_voice_path", "") ?: ""
-            currentSpeed = prefs.getFloat("last_speed", 1.0f)
+            currentSpeed = prefs.getFloat("last_speed", 1.0f); speedState.floatValue = currentSpeed
             currentSteps = prefs.getInt("last_steps", 5)
             currentLang = prefs.getString("last_lang", "en") ?: "en"
             currentBookPath = prefs.getString("last_book_path", null)
@@ -430,6 +434,13 @@ class PlaybackActivity : ComponentActivity() {
         } catch (e: RemoteException) {
             e.printStackTrace()
         }
+    }
+
+    /** Apply changed settings now: restart synthesis at the current sentence, discarding the queued look-ahead. */
+    private fun retune() {
+        saveState()
+        if (!(isPlayingState.value || isServiceActiveState.value)) return
+        playFromIndex(currentIndexState.intValue.coerceAtLeast(0))
     }
 
     private fun playFromIndex(index: Int) {

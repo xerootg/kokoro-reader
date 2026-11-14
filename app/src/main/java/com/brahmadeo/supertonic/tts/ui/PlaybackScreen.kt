@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Home
@@ -46,9 +47,14 @@ fun PlaybackScreen(
     onStopClick: () -> Unit,
     onExportClick: () -> Unit,
     onCancelExportClick: () -> Unit,
-    onSleepTimerClick: () -> Unit
+    onSleepTimerClick: () -> Unit,
+    speed: Float = 1.0f,
+    onSpeedChange: (Float) -> Unit = {},
+    onGapsChanged: () -> Unit = {}
 ) {
     val listState = rememberLazyListState()
+    var showTune by remember { mutableStateOf(false) }
+    var speedDraft by remember(speed) { mutableStateOf(speed) }
     val density = androidx.compose.ui.platform.LocalDensity.current
 
     val bottomPadding by animateDpAsState(
@@ -89,6 +95,10 @@ fun PlaybackScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = { showTune = !showTune }) {
+                        Icon(imageVector = androidx.compose.material.icons.Icons.Default.Tune, contentDescription = "Tune",
+                            tint = if (showTune) MaterialTheme.colorScheme.primary else LocalContentColor.current)
+                    }
                     IconButton(onClick = onHomeClick) {
                         Icon(imageVector = Icons.Default.Home, contentDescription = "Home")
                     }
@@ -122,6 +132,26 @@ fun PlaybackScreen(
                         isActive = index == currentIndex,
                         onClick = { onItemClick(index) }
                     )
+                }
+            }
+
+            // Tune panel: speed and pauses, applied to the sentence being read as soon as a slider is released
+            androidx.compose.animation.AnimatedVisibility(visible = showTune, modifier = Modifier.align(Alignment.TopCenter)) {
+                ElevatedCard(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
+                    colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        SliderWithLabel(
+                            label = "Speed", value = speedDraft, onValueChange = { speedDraft = it },
+                            valueRange = 0.8f..1.5f, steps = 13,
+                            displayValue = String.format(java.util.Locale.US, "%.2fx", speedDraft),
+                            onValueChangeFinished = { onSpeedChange(Math.round(speedDraft * 20f) / 20f) }
+                        )
+                        KokoroGapSliders(onChanged = onGapsChanged)
+                        Text("Changes restart the current sentence. Speed reloads the voice (a few seconds).",
+                            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
             }
 

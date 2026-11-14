@@ -499,7 +499,8 @@ fun SliderWithLabel(
     valueRange: ClosedFloatingPointRange<Float>,
     steps: Int,
     displayValue: String,
-    leadingIcon: ImageVector? = null
+    leadingIcon: ImageVector? = null,
+    onValueChangeFinished: (() -> Unit)? = null
 ) {
     Column {
         Row(
@@ -520,7 +521,8 @@ fun SliderWithLabel(
             value = value,
             onValueChange = onValueChange,
             valueRange = valueRange,
-            steps = steps
+            steps = steps,
+            onValueChangeFinished = onValueChangeFinished
         )
     }
 }
@@ -622,7 +624,7 @@ fun MainScreenPreview() {
 
 /** Kokoro pauses: how long the reader waits at a comma, at a semicolon / colon / dash, and between sentences. */
 @Composable
-fun KokoroGapSliders() {
+fun KokoroGapSliders(onChanged: () -> Unit = {}) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val prefs = remember { context.getSharedPreferences(com.brahmadeo.supertonic.tts.KokoroEngine.PREFS, android.content.Context.MODE_PRIVATE) }
     val engine = com.brahmadeo.supertonic.tts.KokoroEngine
@@ -633,16 +635,16 @@ fun KokoroGapSliders() {
     SliderWithLabel(
         label = "Pause at a comma", value = comma,
         onValueChange = { comma = round(it); engine.gapComma = comma; prefs.edit().putFloat(engine.KEY_GAP_COMMA, comma).apply() },
-        valueRange = 0f..0.6f, steps = 29, displayValue = String.format(Locale.US, "%.2f s", comma)
+        valueRange = 0f..0.6f, steps = 29, displayValue = String.format(Locale.US, "%.2f s", comma), onValueChangeFinished = onChanged
     )
     SliderWithLabel(
         label = "Pause at a semicolon or dash", value = clause,
         onValueChange = { clause = round(it); engine.gapClause = clause; prefs.edit().putFloat(engine.KEY_GAP_CLAUSE, clause).apply() },
-        valueRange = 0f..1f, steps = 49, displayValue = String.format(Locale.US, "%.2f s", clause)
+        valueRange = 0f..1f, steps = 49, displayValue = String.format(Locale.US, "%.2f s", clause), onValueChangeFinished = onChanged
     )
     SliderWithLabel(
         label = "Pause between sentences", value = sentence,
         onValueChange = { sentence = round(it); engine.gapSentence = sentence; prefs.edit().putFloat(engine.KEY_GAP_SENTENCE, sentence).apply() },
-        valueRange = 0f..1.5f, steps = 74, displayValue = String.format(Locale.US, "%.2f s", sentence)
+        valueRange = 0f..1.5f, steps = 74, displayValue = String.format(Locale.US, "%.2f s", sentence), onValueChangeFinished = onChanged
     )
 }
