@@ -50,7 +50,10 @@ fun PlaybackScreen(
     onSleepTimerClick: () -> Unit,
     speed: Float = 1.0f,
     onSpeedChange: (Float) -> Unit = {},
-    onGapsChanged: () -> Unit = {}
+    onGapsChanged: () -> Unit = {},
+    voices: Map<String, String> = emptyMap(),
+    voiceFile: String = "",
+    onVoiceChange: (String) -> Unit = {}
 ) {
     val listState = rememberLazyListState()
     var showTune by remember { mutableStateOf(false) }
@@ -142,6 +145,14 @@ fun PlaybackScreen(
                     colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
                 ) {
                     Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        if (voices.isNotEmpty()) {
+                            DropdownSelector(
+                                label = "Voice",
+                                options = voices.keys.toList().sorted(),
+                                selectedOption = voices.entries.find { it.value == voiceFile }?.key ?: "",
+                                onOptionSelected = { name -> voices[name]?.let(onVoiceChange) }
+                            )
+                        }
                         SliderWithLabel(
                             label = "Speed", value = speedDraft, onValueChange = { speedDraft = it },
                             valueRange = 0.8f..1.5f, steps = 13,

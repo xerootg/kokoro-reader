@@ -451,6 +451,7 @@ class MainActivity : ComponentActivity() {
 
                         voices = viewModel.voiceFiles,
                         selectedVoiceFile = viewModel.selectedVoiceFile.value,
+                        mixingAvailable = !KokoroEngine.isKokoroModelDir(File(filesDir, "v1/onnx").absolutePath),
                         onVoiceChange = {
                             if (viewModel.selectedVoiceFile.value != it) {
                                 viewModel.selectedVoiceFile.value = it
@@ -692,6 +693,16 @@ class MainActivity : ComponentActivity() {
 
     private fun setupVoicesMap(version: String, lang: String) {
         viewModel.voiceFiles.clear()
+        if (version == "v1" && KokoroEngine.isKokoroModelDir(File(filesDir, "v1/onnx").absolutePath)) {
+            // The English slot holds Kokoro: its voices replace the Supertonic list, and blending is not available.
+            viewModel.voiceFiles.putAll(KokoroEngine.voiceChoices())
+            viewModel.isMixingEnabled.value = false
+            if (viewModel.selectedVoiceFile.value !in viewModel.voiceFiles.values) {
+                viewModel.selectedVoiceFile.value = "${KokoroEngine.DEFAULT_VOICE}.json"
+                getSharedPreferences("SupertonicPrefs", MODE_PRIVATE).edit().putString("selected_voice", viewModel.selectedVoiceFile.value).apply()
+            }
+            return
+        }
         val voiceResources = mapOf(
             "M1.json" to R.string.voice_m1,
             "M2.json" to R.string.voice_m2,

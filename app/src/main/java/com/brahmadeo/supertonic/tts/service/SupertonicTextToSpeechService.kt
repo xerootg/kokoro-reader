@@ -9,6 +9,7 @@ import android.util.Log
 import android.content.Context
 import android.os.Build
 import com.brahmadeo.supertonic.tts.SupertonicTTS
+import com.brahmadeo.supertonic.tts.KokoroEngine
 import com.brahmadeo.supertonic.tts.utils.AssetManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -183,7 +184,15 @@ class SupertonicTextToSpeechService : TextToSpeechService() {
         val voicesList = mutableListOf<Voice>()
         val voiceNames = listOf("M1", "M2", "M3", "M4", "M5", "F1", "F2", "F3", "F4", "F5")
 
-        if (modelVersion == "v1") {
+        if (modelVersion == "v1" && KokoroEngine.isKokoroModelDir(File(filesDir, "v1/onnx").absolutePath)) {
+            // Kokoro: every voice in the bundle, named so the existing "-supertonic-<file>" mapping finds its placeholder
+            KokoroEngine.ALL_VOICES.forEach { id ->
+                val locale = when (id[0]) { 'b' -> Locale.UK; 'e' -> Locale.forLanguageTag("es-ES"); 'f' -> Locale.FRANCE
+                    'h' -> Locale.forLanguageTag("hi-IN"); 'i' -> Locale.ITALY; 'j' -> Locale.JAPAN
+                    'p' -> Locale.forLanguageTag("pt-BR"); 'z' -> Locale.CHINA; else -> Locale.US }
+                voicesList.add(Voice("en-supertonic-$id", locale, Voice.QUALITY_VERY_HIGH, Voice.LATENCY_NORMAL, false, setOf()))
+            }
+        } else if (modelVersion == "v1") {
             // Only English Voices
             voiceNames.forEach { name ->
                 voicesList.add(Voice("en-supertonic-$name", Locale.US, Voice.QUALITY_VERY_HIGH, Voice.LATENCY_NORMAL, false, setOf()))

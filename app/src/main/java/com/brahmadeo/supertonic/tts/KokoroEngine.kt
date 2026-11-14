@@ -39,6 +39,30 @@ object KokoroEngine {
     const val MODEL_FILE = "kokoro_int8_fp16.litertlm"
     const val DEFAULT_VOICE = "am_michael"
 
+    /** Every voice in the Kokoro-82M bundle. First letter: a US, b UK, e Spanish, f French, h Hindi, i Italian,
+     *  j Japanese, p Portuguese (BR), z Chinese; second letter: f/m. The English front end only reads English well. */
+    val ALL_VOICES = listOf(
+        "af_alloy", "af_aoede", "af_bella", "af_heart", "af_jessica", "af_kore", "af_nicole", "af_nova", "af_river",
+        "af_sarah", "af_sky", "am_adam", "am_echo", "am_eric", "am_fenrir", "am_liam", "am_michael", "am_onyx",
+        "am_puck", "am_santa", "bf_alice", "bf_emma", "bf_isabella", "bf_lily", "bm_daniel", "bm_fable", "bm_george",
+        "bm_lewis", "ef_dora", "em_alex", "em_santa", "ff_siwis", "hf_alpha", "hf_beta", "hm_omega", "hm_psi",
+        "if_sara", "im_nicola", "jf_alpha", "jf_gongitsune", "jf_nezumi", "jf_tebukuro", "jm_kumo", "pf_dora",
+        "pm_alex", "pm_santa", "zf_xiaobei", "zf_xiaoni", "zf_xiaoxiao", "zf_xiaoyi", "zm_yunjian", "zm_yunxi",
+        "zm_yunxia", "zm_yunyang",
+    )
+
+    /** "am_michael" -> "US male · Michael": sorts by accent and sex, then name. */
+    fun voiceLabel(id: String): String {
+        val lang = mapOf('a' to "US", 'b' to "UK", 'e' to "Spanish", 'f' to "French", 'h' to "Hindi", 'i' to "Italian",
+            'j' to "Japanese", 'p' to "Portuguese", 'z' to "Chinese")[id[0]] ?: id.take(1)
+        val sex = if (id[1] == 'f') "female" else "male"
+        val name = id.substringAfter('_').replaceFirstChar { it.uppercase() }
+        return "$lang $sex · $name"
+    }
+
+    /** The picker's map for this engine: label -> style file name, in the app's existing convention. */
+    fun voiceChoices(): Map<String, String> = ALL_VOICES.associate { voiceLabel(it) to "$it.json" }
+
     /** Raw characters per piece, markup included. The task force-cuts near 90. */
     private const val PIECE_LIMIT = 80
     private const val PIECE_SOFT_MIN = 45

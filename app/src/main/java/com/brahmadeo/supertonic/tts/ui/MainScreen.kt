@@ -57,6 +57,7 @@ fun MainScreen(
     onVoiceChange: (String) -> Unit,
 
     isMixingEnabled: Boolean,
+    mixingAvailable: Boolean = true,
     onMixingEnabledChange: (Boolean) -> Unit,
     selectedVoiceFile2: String,
     onVoice2Change: (String) -> Unit,
@@ -297,6 +298,7 @@ fun MainScreen(
                             onOptionSelected = { name -> onVoiceChange(voices[name] ?: "M1.json") }
                         )
 
+                        if (mixingAvailable) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.fillMaxWidth()
@@ -327,6 +329,7 @@ fun MainScreen(
                                     displayValue = "${(mixAlpha * 100).toInt()}%"
                                 )
                             }
+                        }
                         }
                     }
                 }

@@ -52,7 +52,7 @@ object AssetManager {
         try {
             File(baseDir, "onnx").mkdirs()
             val voiceDir = File(baseDir, "voice_styles").apply { mkdirs() }
-            for (v in KOKORO_VOICES) {
+            for (v in KokoroEngine.ALL_VOICES) {
                 val f = File(voiceDir, "$v.json")
                 if (!f.exists()) f.writeText("{}")
             }

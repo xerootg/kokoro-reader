@@ -37,6 +37,7 @@ import com.brahmadeo.supertonic.tts.ui.PlaybackScreen
 import com.brahmadeo.supertonic.tts.ui.theme.SupertonicTheme
 import com.brahmadeo.supertonic.tts.utils.EbookParser
 import com.brahmadeo.supertonic.tts.utils.TextNormalizer
+import com.brahmadeo.supertonic.tts.KokoroEngine
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -62,6 +63,7 @@ class PlaybackActivity : ComponentActivity() {
     private var currentVoicePath = ""
     private var currentSpeed = 1.0f
     private val speedState = androidx.compose.runtime.mutableFloatStateOf(1.0f)
+    private val voiceFileState = androidx.compose.runtime.mutableStateOf("")
     private var currentSteps = 5
     private var currentLang = "en"
     private var currentBookPath: String? = null
@@ -231,7 +233,16 @@ class PlaybackActivity : ComponentActivity() {
                         onSleepTimerClick = { handleSleepTimerClick() },
                         speed = speedState.floatValue,
                         onSpeedChange = { s -> currentSpeed = s; speedState.floatValue = s; retune() },
-                        onGapsChanged = { retune() }
+                        onGapsChanged = { retune() },
+                        voices = if (KokoroEngine.isKokoroModelDir(File(filesDir, "v1/onnx").absolutePath)) KokoroEngine.voiceChoices() else emptyMap(),
+                        voiceFile = voiceFileState.value,
+                        onVoiceChange = { file ->
+                            currentVoicePath = File(filesDir, "v1/voice_styles/$file").absolutePath
+                            voiceFileState.value = File(currentVoicePath.substringBefore(';')).name
+                            voiceFileState.value = file
+                            getSharedPreferences("SupertonicPrefs", MODE_PRIVATE).edit().putString("selected_voice", file).apply()
+                            retune()
+                        }
                     )
 
                     if (isLoadingNextState.value) {
@@ -264,6 +275,7 @@ class PlaybackActivity : ComponentActivity() {
             val prefs = getSharedPreferences("SupertonicPrefs", MODE_PRIVATE)
             currentText = prefs.getString("last_text", "") ?: ""
             currentVoicePath = prefs.getString("last_voice_path", "") ?: ""
+            voiceFileState.value = File(currentVoicePath.substringBefore(';')).name
             currentSpeed = prefs.getFloat("last_speed", 1.0f); speedState.floatValue = currentSpeed
             currentSteps = prefs.getInt("last_steps", 5)
             currentLang = prefs.getString("last_lang", "en") ?: "en"
@@ -274,6 +286,7 @@ class PlaybackActivity : ComponentActivity() {
         } else {
             currentText = intent.getStringExtra(EXTRA_TEXT) ?: ""
             currentVoicePath = intent.getStringExtra(EXTRA_VOICE_PATH) ?: ""
+            voiceFileState.value = File(currentVoicePath.substringBefore(';')).name
             currentSpeed = intent.getFloatExtra(EXTRA_SPEED, 1.0f); speedState.floatValue = currentSpeed
             currentSteps = intent.getIntExtra(EXTRA_STEPS, 5)
             currentLang = intent.getStringExtra(EXTRA_LANG) ?: "en"
@@ -299,6 +312,7 @@ class PlaybackActivity : ComponentActivity() {
         if (newText.isNotEmpty() && newText != currentText) {
             currentText = newText
             currentVoicePath = prefs.getString("last_voice_path", "") ?: ""
+            voiceFileState.value = File(currentVoicePath.substringBefore(';')).name
             currentSpeed = prefs.getFloat("last_speed", 1.0f); speedState.floatValue = currentSpeed
             currentSteps = prefs.getInt("last_steps", 5)
             currentLang = prefs.getString("last_lang", "en") ?: "en"
@@ -438,6 +452,7 @@ class PlaybackActivity : ComponentActivity() {
 
     /** Apply changed settings now: restart synthesis at the current sentence, discarding the queued look-ahead. */
     private fun retune() {
+        voiceFileState.value = File(currentVoicePath.substringBefore(';')).name
         saveState()
         if (!(isPlayingState.value || isServiceActiveState.value)) return
         playFromIndex(currentIndexState.intValue.coerceAtLeast(0))
