@@ -359,6 +359,7 @@ fun MainScreen(
                         )
 
                         KokoroGapSliders()
+                        KokoroCacheSetting()
 
                         val sibilanceOptions = listOf(
                             stringResource(AppR.string.sibilance_off),
@@ -650,4 +651,24 @@ fun KokoroGapSliders(onChanged: () -> Unit = {}) {
         onValueChange = { sentence = round(it); engine.gapSentence = sentence; prefs.edit().putFloat(engine.KEY_GAP_SENTENCE, sentence).apply() },
         valueRange = 0f..1.5f, steps = 74, displayValue = String.format(Locale.US, "%.2f s", sentence), onValueChangeFinished = onChanged
     )
+}
+
+
+/** Size cap of the synthesised-speech cache, with what it holds now. */
+@Composable
+fun KokoroCacheSetting() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val cache = com.brahmadeo.supertonic.tts.utils.AudioCache
+    LaunchedEffect(Unit) { cache.init(context) }
+    var mb by remember { mutableStateOf((cache.limitBytes / 1048576L).toInt()) }
+    var used by remember { mutableStateOf(0L) }
+    LaunchedEffect(mb) { used = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { cache.usedBytes() } }
+    SliderWithLabel(
+        label = "Speech cache (${used / 1048576} MB used)", value = mb.toFloat(),
+        onValueChange = { mb = (Math.round(it / 128f) * 128).coerceAtLeast(128) },
+        valueRange = 128f..4096f, steps = 30,
+        displayValue = if (mb >= 1024) String.format(Locale.US, "%.1f GB", mb / 1024f) else "$mb MB",
+        onValueChangeFinished = { cache.setLimitMb(context, mb) }
+    )
+    TextButton(onClick = { kotlin.concurrent.thread { cache.clear() }; used = 0 }) { Text("Clear speech cache") }
 }

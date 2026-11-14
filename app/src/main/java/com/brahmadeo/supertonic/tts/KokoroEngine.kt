@@ -1,6 +1,7 @@
 package com.brahmadeo.supertonic.tts
 
 import android.util.Log
+import com.brahmadeo.supertonic.tts.utils.AudioCache
 import com.brahmadeo.supertonic.tts.utils.LexiconManager
 import com.google.mediapipe.tasks.audio.texttospeech.SynthesisOptions
 import com.google.mediapipe.tasks.audio.texttospeech.TextToSpeech
@@ -90,7 +91,7 @@ object KokoroEngine {
         gapComma = p.getFloat(KEY_GAP_COMMA, GAP_COMMA_DEFAULT)
         gapClause = p.getFloat(KEY_GAP_CLAUSE, GAP_CLAUSE_DEFAULT)
         gapSentence = p.getFloat(KEY_GAP_SENTENCE, GAP_SENTENCE_DEFAULT)
-        if (appContext == null) { appContext = context.applicationContext; preferredRate = p.getFloat(KEY_LAST_RATE, 1.0f) }
+        if (appContext == null) { appContext = context.applicationContext; preferredRate = p.getFloat(KEY_LAST_RATE, 1.0f); AudioCache.init(context) }
     }
     private const val TRIM_THRESHOLD = 0.012f
     private const val TRIM_KEEP_S = 0.04f
@@ -204,29 +205,35 @@ object KokoroEngine {
         // Counts only, never the text: enough to confirm the lexicon and the cutter are doing their job.
         Log.i(TAG, "synth voice=$voice chars=${text.length} lexiconRules=${LexiconManager.phonemeRules().size} " +
             "pinned=${markupSpan.findAll(marked).count()} pieces=${cut.size} longestPiece=${cut.maxOfOrNull { it.first.length } ?: 0}")
-        var total = 0; var delivered = 0
+        var total = 0; var delivered = 0; var cached = 0
         val started = android.os.SystemClock.elapsedRealtime()
+        val modelName = File(modelPath).name
         for ((piece, gap) in cut) {
-            val tp = android.os.SystemClock.elapsedRealtime()
-            val samples = try {
-                engine.synthesize(piece, SynthesisOptions(voiceId = voice)).samples
-            } catch (e: Throwable) {
-                Log.e(TAG, "Synthesis failed for a piece of ${piece.length} characters: ${e.message}")
-                continue
+            val key = AudioCache.key(modelName, voice, loadedRate, piece)
+            var speech: ByteArray? = AudioCache.get(key)          // trimmed PCM without the gap
+            if (speech != null) cached++ else {
+                val tp = android.os.SystemClock.elapsedRealtime()
+                val samples = try {
+                    engine.synthesize(piece, SynthesisOptions(voiceId = voice)).samples
+                } catch (e: Throwable) {
+                    Log.e(TAG, "Synthesis failed for a piece of ${piece.length} characters: ${e.message}")
+                    continue
+                }
+                Log.i(TAG, "piece chars=${piece.length} ms=${android.os.SystemClock.elapsedRealtime() - tp} audio=${"%.2f".format(samples.size / SAMPLE_RATE.toFloat())} s")
+                val trimmed = trim(samples)
+                if (trimmed.isEmpty()) continue
+                val b = ByteBuffer.allocate(trimmed.size * 2).order(ByteOrder.LITTLE_ENDIAN)
+                for (s in trimmed) b.putShort((s.coerceIn(-1f, 1f) * 32767f).toInt().toShort())
+                speech = b.array()
+                AudioCache.put(key, speech)
             }
-            Log.i(TAG, "piece chars=${piece.length} ms=${android.os.SystemClock.elapsedRealtime() - tp} audio=${"%.2f".format(samples.size / SAMPLE_RATE.toFloat())} s " +
-                "thread=${Thread.currentThread().name} prio=${android.os.Process.getThreadPriority(android.os.Process.myTid())}")
-            val trimmed = trim(samples)
-            if (trimmed.isEmpty()) continue
-            val gapSamples = (gap * SAMPLE_RATE).toInt().coerceAtLeast(0)
-            val pcm = ByteBuffer.allocate((trimmed.size + gapSamples) * 2).order(ByteOrder.LITTLE_ENDIAN)
-            for (s in trimmed) pcm.putShort((s.coerceIn(-1f, 1f) * 32767f).toInt().toShort())
-            repeat(gapSamples) { pcm.putShort(0) }
-            total += trimmed.size + gapSamples; delivered++
-            onPiece(pcm.array())
+            val gapBytes = (gap * SAMPLE_RATE).toInt().coerceAtLeast(0) * 2
+            val out = if (gapBytes == 0) speech else speech.copyOf(speech.size + gapBytes)   // zeros = silence
+            total += out.size / 2; delivered++
+            onPiece(out)
         }
         val ms = android.os.SystemClock.elapsedRealtime() - started
-        Log.i(TAG, "synth done in $ms ms for ${"%.1f".format(total / SAMPLE_RATE.toFloat())} s of audio, $delivered pieces")
+        Log.i(TAG, "synth done in $ms ms for ${"%.1f".format(total / SAMPLE_RATE.toFloat())} s of audio, $delivered pieces, $cached from cache")
         return delivered
     }
 
