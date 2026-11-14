@@ -49,6 +49,11 @@ object KokoroEngine {
     const val KEY_GAP_COMMA = "kokoro_gap_comma"
     const val KEY_GAP_CLAUSE = "kokoro_gap_clause"
     const val KEY_GAP_SENTENCE = "kokoro_gap_sentence"
+    private const val KEY_LAST_RATE = "kokoro_last_rate"
+    @Volatile private var appContext: android.content.Context? = null
+    /** The speaking rate last asked for. The task takes its rate at load time, so loading at this rate avoids a second load. */
+    @Volatile var preferredRate = 1.0f
+        private set
 
     /** Silence, in seconds, after a comma / after a semicolon, colon or dash / between sentences. Set from the sliders. */
     @Volatile var gapComma = GAP_COMMA_DEFAULT
@@ -61,6 +66,7 @@ object KokoroEngine {
         gapComma = p.getFloat(KEY_GAP_COMMA, GAP_COMMA_DEFAULT)
         gapClause = p.getFloat(KEY_GAP_CLAUSE, GAP_CLAUSE_DEFAULT)
         gapSentence = p.getFloat(KEY_GAP_SENTENCE, GAP_SENTENCE_DEFAULT)
+        if (appContext == null) { appContext = context.applicationContext; preferredRate = p.getFloat(KEY_LAST_RATE, 1.0f) }
     }
     private const val TRIM_THRESHOLD = 0.012f
     private const val TRIM_KEEP_S = 0.04f
@@ -86,7 +92,7 @@ object KokoroEngine {
     fun isInitialized(onnxDir: String): Boolean = tts != null && loadedModel == modelFileFor(onnxDir).absolutePath
 
     @Synchronized
-    fun initialize(onnxDir: String, speakingRate: Float = 1.0f): Boolean {
+    fun initialize(onnxDir: String, speakingRate: Float = preferredRate): Boolean {
         val model = modelFileFor(onnxDir)
         if (tts != null && loadedModel == model.absolutePath && abs(loadedRate - speakingRate) < 0.01f) return true
         release()
@@ -142,6 +148,10 @@ object KokoroEngine {
     fun synthesize(text: String, stylePath: String, speed: Float): ByteArray? {
         val modelPath = loadedModel ?: return null
         // The task takes its speaking rate when it is created, so a new rate means a new task.
+        if (abs(speed - preferredRate) >= 0.01f) {
+            preferredRate = speed
+            appContext?.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE)?.edit()?.putFloat(KEY_LAST_RATE, speed)?.apply()
+        }
         if (abs(speed - loadedRate) >= 0.01f) {
             val onnxDir = File(File(modelPath).parentFile, "onnx").absolutePath
             if (!initialize(onnxDir, speed)) return null
@@ -155,6 +165,7 @@ object KokoroEngine {
             "pinned=${markupSpan.findAll(marked).count()} pieces=${cut.size} longestPiece=${cut.maxOfOrNull { it.first.length } ?: 0}")
         val out = ArrayList<FloatArray>()
         var total = 0
+        val started = android.os.SystemClock.elapsedRealtime()
         for ((piece, gap) in cut) {
             val samples = try {
                 engine.synthesize(piece, SynthesisOptions(voiceId = voice)).samples
@@ -169,6 +180,8 @@ object KokoroEngine {
             if (gapSamples > 0) { out.add(FloatArray(gapSamples)); total += gapSamples }
         }
         if (total == 0) return null
+        val ms = android.os.SystemClock.elapsedRealtime() - started
+        Log.i(TAG, "synth done in $ms ms for ${"%.1f".format(total / SAMPLE_RATE.toFloat())} s of audio")
         val pcm = ByteBuffer.allocate(total * 2).order(ByteOrder.LITTLE_ENDIAN)
         for (chunk in out) for (s in chunk) pcm.putShort((s.coerceIn(-1f, 1f) * 32767f).toInt().toShort())
         return pcm.array()
