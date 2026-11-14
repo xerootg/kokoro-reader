@@ -27,7 +27,15 @@ What was learned while turning the Supertonic TTS reader into a Kokoro-based aud
   is how the pronunciation lexicon is applied. It does not rewrite the Spanish tap `ɾ` the way
   desktop misaki does.
 - `target_bucket` in the task options selects a fixed bucket; values other than 0 hung the desktop
-  Python task. Do not use it.
+  Python task on the stock bundle. It does not change the chunking.
+- **The ~90-character chunk is set by the runtime, not the model.** A re-exported bundle with a
+  512-token acoustic model (`tools/export`) loads and runs (each run ~3.5x slower, since every call
+  pads to 512 tokens), but the runtime still cut the text at the same places. In LiteRT-LM,
+  `ReviseTextChunkConfigForKokoro` sets `Text2SpeechTextChunkConfig.max_buffer_size` (main: at most
+  120 characters), and nothing in the MediaPipe Java/Python/Kotlin API or in `litertlm-android` can
+  change it; only the C++ `Text2SpeechSessionConfig` can. Whole-sentence runs therefore need the C++
+  runtime built with a raised limit (`tools/LiteRT-LM`, patched `text2speech_runner.cc` with
+  `--max_chunk_chars`), and on Android a small JNI of our own on top of `//omni/text2speech:kokoro`.
 
 ## Text handling in the app (`KokoroEngine.pieces`)
 

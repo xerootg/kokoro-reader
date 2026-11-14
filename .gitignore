@@ -47,3 +47,4 @@ tools/export/hf/
 tools/export/unpack/
 tools/export/out*/
 tools/export/*.log
+tools/LiteRT-LM/
