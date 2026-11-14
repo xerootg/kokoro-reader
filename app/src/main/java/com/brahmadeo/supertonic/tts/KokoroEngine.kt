@@ -67,6 +67,17 @@ object KokoroEngine {
     /** Raw characters per piece, markup included. The task force-cuts near 90. */
     private const val PIECE_LIMIT = 80
     private const val PIECE_SOFT_MIN = 45
+
+    /** Long-bucket bundles (tools/export, 512 phoneme tokens) for the direct LiteRT-LM binding. */
+    const val LONG_MODEL_GPU = "kokoro_512_gpu.litertlm"
+    const val LONG_MODEL_CPU = "kokoro_512_cpu.litertlm"
+    /** Raw characters per run on the long-bucket path: 512 tokens is about 380 characters; keep a margin. */
+    private const val LONG_PIECE_LIMIT = 340
+    private const val NATIVE_CHUNK_CHARS = 400          // the runtime's own limit, set above ours so it never cuts
+
+    private var native = 0L
+    private var nativeModel: String? = null
+    private var nativeVoice: String? = null
     const val GAP_COMMA_DEFAULT = 0.16f
     const val GAP_CLAUSE_DEFAULT = 0.30f
     const val GAP_SENTENCE_DEFAULT = 0.45f
@@ -157,6 +168,39 @@ object KokoroEngine {
         try { tts?.close() } catch (_: Throwable) {}
         tts = null
         loadedModel = null
+        releaseNative()
+    }
+
+    private fun releaseNative() {
+        if (native != 0L) { try { KokoroNative.nativeDestroy(native) } catch (_: Throwable) {} }
+        native = 0L; nativeModel = null; nativeVoice = null
+    }
+
+    /** The long-bucket bundle beside the stock one, GPU build first, or null. */
+    fun longModelFor(modelPath: String): File? {
+        val dir = File(modelPath).parentFile ?: return null
+        return listOf(LONG_MODEL_GPU, LONG_MODEL_CPU).map { File(dir, it) }.firstOrNull { it.exists() && it.length() > 0 }
+    }
+
+    /** True when whole sentences can go through the direct binding: library packaged, long model present, speed 1.0. */
+    fun longPathAvailable(modelPath: String?, speed: Float): Boolean =
+        modelPath != null && abs(speed - 1.0f) < 0.01f && KokoroNative.available && longModelFor(modelPath) != null
+
+    /** Create (or re-create for a new voice) the direct engine. Returns false if it could not be made. */
+    @Synchronized
+    private fun ensureNative(model: File, voice: String): Boolean {
+        if (native != 0L && nativeModel == model.absolutePath && nativeVoice == voice) return true
+        releaseNative()
+        val cache = File(model.parentFile, "cache_native").apply { mkdirs() }
+        val backend = if (model.name == LONG_MODEL_GPU) KokoroNative.BACKEND_GPU else KokoroNative.BACKEND_CPU
+        val t0 = android.os.SystemClock.elapsedRealtime()
+        native = try {
+            KokoroNative.nativeCreate(model.absolutePath, backend, cache.absolutePath, "en-US", voice, NATIVE_CHUNK_CHARS, true, 4)
+        } catch (e: Throwable) { Log.e(TAG, "native create threw: ${e.message}"); 0L }
+        if (native == 0L) { Log.e(TAG, "direct engine failed for ${model.name}; using the MediaPipe task"); return false }
+        nativeModel = model.absolutePath; nativeVoice = voice
+        Log.i(TAG, "direct engine ready: ${model.name} backend=$backend voice=$voice load ${android.os.SystemClock.elapsedRealtime() - t0} ms")
+        return true
     }
 
     fun voiceIds(): Set<String> = voices
@@ -198,23 +242,28 @@ object KokoroEngine {
             val onnxDir = File(File(modelPath).parentFile, "onnx").absolutePath
             if (!initialize(onnxDir, speed)) return 0
         }
-        val engine = tts ?: return 0
         val voice = voiceFromStylePath(stylePath)
         val marked = applyPhonemeLexicon(text)
-        val cut = pieces(marked)
+        // Whole sentences per run when the direct binding and a long-bucket model are available.
+        val longModel = if (longPathAvailable(modelPath, speed)) longModelFor(modelPath) else null
+        val direct = longModel != null && ensureNative(longModel, voice)
+        val engine = if (direct) null else (tts ?: return 0)
+        val cut = if (direct) pieces(marked, LONG_PIECE_LIMIT, clauseCuts = false) else pieces(marked)
         // Counts only, never the text: enough to confirm the lexicon and the cutter are doing their job.
         Log.i(TAG, "synth voice=$voice chars=${text.length} lexiconRules=${LexiconManager.phonemeRules().size} " +
             "pinned=${markupSpan.findAll(marked).count()} pieces=${cut.size} longestPiece=${cut.maxOfOrNull { it.first.length } ?: 0}")
         var total = 0; var delivered = 0; var cached = 0
         val started = android.os.SystemClock.elapsedRealtime()
-        val modelName = File(modelPath).name
+        val modelName = if (direct) longModel!!.name else File(modelPath).name
         for ((piece, gap) in cut) {
             val key = AudioCache.key(modelName, voice, loadedRate, piece)
             var speech: ByteArray? = AudioCache.get(key)          // trimmed PCM without the gap
             if (speech != null) cached++ else {
                 val tp = android.os.SystemClock.elapsedRealtime()
                 val samples = try {
-                    engine.synthesize(piece, SynthesisOptions(voiceId = voice)).samples
+                    if (direct) KokoroNative.nativeSynthesize(native, piece)
+                        ?: throw IllegalStateException(KokoroNative.nativeLastError(native))
+                    else engine!!.synthesize(piece, SynthesisOptions(voiceId = voice)).samples
                 } catch (e: Throwable) {
                     Log.e(TAG, "Synthesis failed for a piece of ${piece.length} characters: ${e.message}")
                     continue
@@ -297,7 +346,7 @@ object KokoroEngine {
         "why with without").split(" ").toSet()
 
     /** Cut text into pieces the task will not cut again, each with the gap (seconds) to put after it. */
-    fun pieces(marked: String): List<Pair<String, Float>> {
+    fun pieces(marked: String, limit: Int = PIECE_LIMIT, clauseCuts: Boolean = true): List<Pair<String, Float>> {
         val tokens = tokenPattern.findAll(marked).map { it.value }.toList()
         val out = ArrayList<Pair<String, Float>>()
         val cur = ArrayList<String>()
@@ -319,8 +368,8 @@ object KokoroEngine {
             val gap = clauseGap(last)
             // A sentence end inside the text: cut here ourselves, or the task cuts and keeps a second of silence.
             if (endsSentence(tok, next)) flush(gapSentence)
-            else if (gap != null && (length >= PIECE_SOFT_MIN || length + next.length + 1 > PIECE_LIMIT)) flush(gap)
-            else if (length + next.length + 1 > PIECE_LIMIT) {
+            else if (gap != null && clauseCuts && (length >= PIECE_SOFT_MIN || length + next.length + 1 > limit)) flush(gap)
+            else if (length + next.length + 1 > limit) {
                 // Forced cut between words. Not wherever the limit falls (that split "Joe | Mondragón" and was
                 // heard as a long gap): back up to the last word a phrase can start with and carry the rest on.
                 fun lenTo(q: Int) = cur.take(q).sumOf { it.length } + q - 1
