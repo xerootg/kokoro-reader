@@ -20,15 +20,30 @@ pub const MARK_END: &str = "kqz";
 
 pub struct Dict {
     data: Vec<u8>,
+    /// In-sentence forms of common words (en_context.tsv, from tools/harvest_context.py).
+    /// Function words lose their stress in running speech; this small table wins over `data`.
+    context: std::collections::HashMap<String, String>,
 }
 
 impl Dict {
     pub fn load(path: &str) -> std::io::Result<Self> {
-        Ok(Dict { data: std::fs::read(path)? })
+        Ok(Dict { data: std::fs::read(path)?, context: Default::default() })
+    }
+
+    /// Optional: load "word\tphonemes[\tcount]" lines learned from running text.
+    pub fn load_context(&mut self, path: &str) -> std::io::Result<usize> {
+        for line in std::fs::read_to_string(path)?.lines() {
+            let mut it = line.split('\t');
+            if let (Some(w), Some(p)) = (it.next(), it.next()) {
+                self.context.insert(w.to_string(), p.to_string());
+            }
+        }
+        Ok(self.context.len())
     }
 
     /// Binary search over "word\tphonemes\n" lines sorted by word (byte order).
     pub fn lookup(&self, word: &str) -> Option<&str> {
+        if let Some(p) = self.context.get(word) { return Some(p.as_str()); }
         let d = &self.data;
         let key = word.as_bytes();
         let (mut lo, mut hi) = (0usize, d.len());
