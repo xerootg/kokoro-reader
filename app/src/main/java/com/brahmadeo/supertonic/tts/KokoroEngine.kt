@@ -23,6 +23,7 @@ import kotlin.math.abs
  *     `[Mondragón](/mondɾaɣˈon/)`, which pins those exact Kokoro phonemes.
  *  2. Pauses. The task keeps about a second of silence wherever it cuts text, and it cuts at
  *     `. ? ! ;`, at double quotation marks and after roughly 90 raw characters (markup counts).
+ *     That includes a sentence end in the middle of the text it is given.
  *     Measured on kokoro_int8_fp16.litertlm, November 2026. So text is cut here first, into
  *     pieces the task will not cut again, and each piece's own silence is trimmed.
  *  3. Gaps. With the task's silence gone, the gap after each piece is chosen here.
@@ -41,6 +42,7 @@ object KokoroEngine {
     private const val GAP_COMMA_S = 0.16f
     private const val GAP_CLAUSE_S = 0.30f
     private const val GAP_FORCED_S = 0.05f
+    private const val GAP_SENTENCE_S = 0.45f
     private const val TRIM_THRESHOLD = 0.012f
     private const val TRIM_KEEP_S = 0.04f
 
@@ -117,9 +119,13 @@ object KokoroEngine {
         val engine = tts ?: return null
         val voice = voiceFromStylePath(stylePath)
         val marked = applyPhonemeLexicon(text)
+        val cut = pieces(marked)
+        // Counts only, never the text: enough to confirm the lexicon and the cutter are doing their job.
+        Log.i(TAG, "synth voice=$voice chars=${text.length} lexiconRules=${LexiconManager.phonemeRules().size} " +
+            "pinned=${markupSpan.findAll(marked).count()} pieces=${cut.size} longestPiece=${cut.maxOfOrNull { it.first.length } ?: 0}")
         val out = ArrayList<FloatArray>()
         var total = 0
-        for ((piece, gap) in pieces(marked)) {
+        for ((piece, gap) in cut) {
             val samples = try {
                 engine.synthesize(piece, SynthesisOptions(voiceId = voice)).samples
             } catch (e: Throwable) {
@@ -178,6 +184,19 @@ object KokoroEngine {
 
     private val tokenPattern = Regex("""\[[^\]]*]\(/[^/]*/\)\S*|\S+""")
     private val clauseGap = mapOf(',' to GAP_COMMA_S, ';' to GAP_CLAUSE_S, ':' to GAP_CLAUSE_S, '—' to GAP_CLAUSE_S)
+    private val abbreviations = setOf("mr.", "mrs.", "ms.", "dr.", "st.", "sr.", "jr.", "prof.", "gen.", "col.", "capt.",
+        "sgt.", "lt.", "rev.", "hon.", "no.", "vs.", "etc.", "e.g.", "i.e.", "u.s.")
+
+    /** True if this token ends a sentence: the caller may pass several short sentences in one call. */
+    private fun endsSentence(token: String, next: String): Boolean {
+        val bare = token.trimEnd('"', '”', '’', '\'', ')')
+        val last = bare.lastOrNull() ?: return false
+        if (last != '.' && last != '?' && last != '!' && last != '…') return false
+        if (next.isEmpty()) return false                       // the end of the text is handled by the final flush
+        if (last == '.' && (bare.lowercase() in abbreviations || bare.length == 2)) return false   // "Mr.", "J."
+        val first = next.trimStart('"', '“', '‘', '\'', '(', '[').firstOrNull() ?: return false
+        return first.isUpperCase() || first.isDigit() || last != '.'
+    }
 
     /** Cut text into pieces the task will not cut again, each with the gap (seconds) to put after it. */
     fun pieces(marked: String): List<Pair<String, Float>> {
@@ -200,7 +219,9 @@ object KokoroEngine {
             val last = if (tok == "—") '—' else tok.trimEnd('"', '”', '’', '\'', ')').lastOrNull()
             val next = tokens.getOrNull(k + 1) ?: ""
             val gap = clauseGap[last]
-            if (gap != null && (length >= PIECE_SOFT_MIN || length + next.length + 1 > PIECE_LIMIT)) flush(gap)
+            // A sentence end inside the text: cut here ourselves, or the task cuts and keeps a second of silence.
+            if (endsSentence(tok, next)) flush(GAP_SENTENCE_S)
+            else if (gap != null && (length >= PIECE_SOFT_MIN || length + next.length + 1 > PIECE_LIMIT)) flush(gap)
             else if (length + next.length + 1 > PIECE_LIMIT) flush(GAP_FORCED_S)
         }
         flush(0f)
