@@ -34,8 +34,17 @@ What was learned while turning the Supertonic TTS reader into a Kokoro-based aud
   `ReviseTextChunkConfigForKokoro` sets `Text2SpeechTextChunkConfig.max_buffer_size` (main: at most
   120 characters), and nothing in the MediaPipe Java/Python/Kotlin API or in `litertlm-android` can
   change it; only the C++ `Text2SpeechSessionConfig` can. Whole-sentence runs therefore need the C++
-  runtime built with a raised limit (`tools/LiteRT-LM`, patched `text2speech_runner.cc` with
-  `--max_chunk_chars`), and on Android a small JNI of our own on top of `//omni/text2speech:kokoro`.
+  runtime built with a raised limit: `tools/LiteRT-LM` (fork `xerootg/LiteRT-LM`, branch
+  `kokoro-reader`) adds `--max_chunk_chars` / `--sentence_delimiters_only` to the runner, a
+  `KOKORO_SLICES` log in the acoustic stage, and `omni/text2speech/jni` (a JNI the app loads as
+  `KokoroNative`). Verified on the desktop: a 187-token sentence is 2 acoustic runs with the stock
+  bundle and 1 with the 512 bundle; a 268-token sentence 3 vs 1. The short silences that remain are
+  the model's own comma pauses. A 512-token run costs about twice a 128-token run.
+- Building LiteRT-LM here: Bazel 7.6.1 via bazelisk, `clang` on PATH (a wrapper around the NDK's
+  clang works for host builds), `--copt=-DHWY_COMPILE_ONLY_EMU128` on x86 (Highway's AVX-512 code
+  does not compile with clang 21), and the LFS prebuilts under `prebuilt/` fetched from
+  `media.githubusercontent.com` (the repo uses Git LFS; without git-lfs the files are pointers).
+  Android: `--config=android_arm64` with `ANDROID_NDK_HOME` set.
 
 ## Text handling in the app (`KokoroEngine.pieces`)
 

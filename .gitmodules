@@ -2,3 +2,7 @@
 	path = tools/export/LiteRT-Torch
 	url = git@github.com:xerootg/litert-torch.git
 	branch = kokoro-bucket-512
+[submodule "tools/LiteRT-LM"]
+	path = tools/LiteRT-LM
+	url = git@github.com:xerootg/LiteRT-LM.git
+	branch = kokoro-reader
