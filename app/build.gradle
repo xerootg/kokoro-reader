@@ -204,7 +204,7 @@ android {
 
     packagingOptions {
         jniLibs {
-            useLegacyPackaging = true
+            useLegacyPackaging = false   // store .so uncompressed and 16 KB zip-aligned (Android 15+ page-size check)
             pickFirst '**/libonnxruntime.so'
             pickFirst '**/libsupertonic_tts.so'
         }

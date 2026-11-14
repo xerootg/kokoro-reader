@@ -107,8 +107,8 @@ object KokoroEngine {
     private const val TRIM_THRESHOLD = 0.012f
     private const val TRIM_KEEP_S = 0.04f
 
-    private var tts: TextToSpeech? = null
-    private var loadedModel: String? = null
+    @Volatile private var tts: TextToSpeech? = null
+    @Volatile private var loadedModel: String? = null
     private var loadedRate = 1.0f
     private var voices: Set<String> = ALL_VOICES.toSet()
     /** True when the MediaPipe task was not created at initialize() because the direct path will serve; it is made on demand. */
@@ -126,7 +126,7 @@ object KokoroEngine {
 
     fun isKokoroModelDir(onnxDir: String): Boolean = modelFileFor(onnxDir).let { it.exists() && it.length() > 0 }
 
-    @Synchronized
+    /** Never takes the engine lock: the UI thread asks this while a worker may be inside a sentence. */
     fun isInitialized(onnxDir: String): Boolean = (tts != null || taskDeferred) && loadedModel == modelFileFor(onnxDir).absolutePath
 
     @Synchronized
@@ -231,7 +231,6 @@ object KokoroEngine {
      * Synthesise one sentence (or any short text). Returns 16-bit little-endian PCM at [SAMPLE_RATE],
      * or null if the engine is not ready or produced nothing.
      */
-    @Synchronized
     fun synthesize(text: String, stylePath: String, speed: Float): ByteArray? {
         val out = ArrayList<ByteArray>()
         synthesizeStreaming(text, stylePath, speed) { out.add(it) }
@@ -246,33 +245,13 @@ object KokoroEngine {
      * engine has made it, with its gap appended, so playback can start after the first piece instead of the
      * whole text. Returns the number of pieces delivered.
      */
-    @Synchronized
     fun synthesizeStreaming(text: String, stylePath: String, speed: Float, onPiece: (ByteArray) -> Unit): Int {
-        val modelPath = loadedModel ?: return 0
-        // The task takes its speaking rate when it is created, so a new rate means a new task.
-        if (abs(speed - preferredRate) >= 0.01f) {
-            preferredRate = speed
-            appContext?.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE)?.edit()?.putFloat(KEY_LAST_RATE, speed)?.apply()
-        }
-        if (abs(speed - loadedRate) >= 0.01f) {
-            val onnxDir = File(File(modelPath).parentFile, "onnx").absolutePath
-            if (!initialize(onnxDir, speed)) return 0
-        }
-        val voice = voiceFromStylePath(stylePath)
-        val marked = applyPhonemeLexicon(text)
-        // Whole sentences per run when the direct binding and a long-bucket model are available.
-        val longModel = if (longPathAvailable(modelPath, speed)) longModelFor(modelPath) else null
-        val direct = longModel != null && ensureNative(longModel, voice)
-        val engine = if (direct) null else (tts ?: run {
-            // The task was deferred in favour of the direct path; make it now (speed changed, or the direct engine failed).
-            val onnxDir = File(File(modelPath).parentFile, "onnx").absolutePath
-            if (!createTask(File(modelPath), loadedRate, onnxDir)) return 0
-            tts ?: return 0
-        })
-        val cut = if (direct) pieces(marked, LONG_PIECE_LIMIT, clauseCuts = false) else pieces(marked)
-        // Counts only, never the text: enough to confirm the lexicon and the cutter are doing their job.
-        Log.i(TAG, "synth voice=$voice chars=${text.length} lexiconRules=${LexiconManager.phonemeRules().size} " +
-            "pinned=${markupSpan.findAll(marked).count()} pieces=${cut.size} longestPiece=${cut.maxOfOrNull { it.first.length } ?: 0}")
+        // The engine lock is held only while the engine is being set up or is inside one piece, never across
+        // onPiece: the player's producer parks in that callback when its look-ahead is full, for as long as
+        // playback takes to drain it, and anything on the UI thread that touched a locked method froze with it
+        // (the 2026-11-13 lock-up: MainActivity.initializeEngine -> isInitialized waited on this lock).
+        val plan = synchronized(this) { prepare(text, stylePath, speed) } ?: return 0
+        val (direct, longModel, engine, voice, cut, modelPath) = plan
         var total = 0; var delivered = 0; var cached = 0
         val started = android.os.SystemClock.elapsedRealtime()
         val modelName = if (direct) longModel!!.name else File(modelPath).name
@@ -283,9 +262,17 @@ object KokoroEngine {
             if (speech != null) cached++ else {
                 val tp = android.os.SystemClock.elapsedRealtime()
                 val samples = try {
-                    if (direct) KokoroNative.nativeSynthesize(native, piece)
-                        ?: throw IllegalStateException(KokoroNative.nativeLastError(native))
-                    else engine!!.synthesize(piece, SynthesisOptions(voiceId = voice)).samples
+                    synchronized(this) {
+                        // Released or re-made for another voice while we were out of the lock? Then this sentence is over.
+                        if (direct) {
+                            if (native == 0L || nativeModel != longModel!!.absolutePath || nativeVoice != voice) return delivered
+                            KokoroNative.nativeSynthesize(native, piece)
+                                ?: throw IllegalStateException(KokoroNative.nativeLastError(native))
+                        } else {
+                            if (tts !== engine) return delivered
+                            engine!!.synthesize(piece, SynthesisOptions(voiceId = voice)).samples
+                        }
+                    }
                 } catch (e: Throwable) {
                     Log.e(TAG, "Synthesis failed for a piece of ${piece.length} characters: ${e.message}")
                     continue
@@ -307,6 +294,40 @@ object KokoroEngine {
         val ms = android.os.SystemClock.elapsedRealtime() - started
         Log.i(TAG, "synth done in $ms ms for ${"%.1f".format(total / SAMPLE_RATE.toFloat())} s of audio, $delivered pieces, $cached from cache")
         return delivered
+    }
+
+
+    private data class Plan(val direct: Boolean, val longModel: File?, val engine: TextToSpeech?, val voice: String,
+                            val cut: List<Pair<String, Float>>, val modelPath: String)
+
+    /** Everything that needs the engine lock before the first piece: rate, voice, engine choice, cutting. */
+    private fun prepare(text: String, stylePath: String, speed: Float): Plan? {
+        val modelPath = loadedModel ?: return null
+        // The task takes its speaking rate when it is created, so a new rate means a new task.
+        if (abs(speed - preferredRate) >= 0.01f) {
+            preferredRate = speed
+            appContext?.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE)?.edit()?.putFloat(KEY_LAST_RATE, speed)?.apply()
+        }
+        if (abs(speed - loadedRate) >= 0.01f) {
+            val onnxDir = File(File(modelPath).parentFile, "onnx").absolutePath
+            if (!initialize(onnxDir, speed)) return null
+        }
+        val voice = voiceFromStylePath(stylePath)
+        val marked = applyPhonemeLexicon(text)
+        // Whole sentences per run when the direct binding and a long-bucket model are available.
+        val longModel = if (longPathAvailable(modelPath, speed)) longModelFor(modelPath) else null
+        val direct = longModel != null && ensureNative(longModel, voice)
+        val engine = if (direct) null else (tts ?: run {
+            // The task was deferred in favour of the direct path; make it now (speed changed, or the direct engine failed).
+            val onnxDir = File(File(modelPath).parentFile, "onnx").absolutePath
+            if (!createTask(File(modelPath), loadedRate, onnxDir)) return null
+            tts ?: return null
+        })
+        val cut = if (direct) pieces(marked, LONG_PIECE_LIMIT, clauseCuts = false) else pieces(marked)
+        // Counts only, never the text: enough to confirm the lexicon and the cutter are doing their job.
+        Log.i(TAG, "synth voice=$voice chars=${text.length} lexiconRules=${LexiconManager.phonemeRules().size} " +
+            "pinned=${markupSpan.findAll(marked).count()} pieces=${cut.size} longestPiece=${cut.maxOfOrNull { it.first.length } ?: 0}")
+        return Plan(direct, longModel, engine, voice, cut, modelPath)
     }
 
     // --- pronunciation -------------------------------------------------------------------------

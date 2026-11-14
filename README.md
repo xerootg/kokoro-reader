@@ -25,7 +25,7 @@ text-to-speech integration. The Supertonic engine was replaced with Kokoro.
 
 ## Building
 
-Requirements: JDK 17 or 21, Android SDK platform 37 with NDK r29, Rust (stable) with the
+Requirements: JDK 17 or 21 (`JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 ./gradlew ...` if the default JDK is a newer runtime without a compiler), Android SDK platform 37 with NDK r29, Rust (stable) with the
 `aarch64-linux-android` target, and `cargo vendor` run once in `rust/`.
 
     cd rust && cargo vendor vendor && cd ..

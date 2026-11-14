@@ -5,8 +5,8 @@ import java.util.concurrent.atomic.AtomicReference
 import java.util.regex.Pattern
 
 object SupertonicTTS {
-    private var nativePtr: Long = 0
-    private var currentModelPath: String? = null
+    @Volatile private var nativePtr: Long = 0
+    @Volatile private var currentModelPath: String? = null
 
     private val HINDI_SPLIT_PATTERN = Pattern.compile("([.!?\\u0964\\u0965]['\\u2019\\u201D\\u0022)}\\]]?)\\s+")
     private val JAPANESE_SPLIT_PATTERN = Pattern.compile("([。！？][」』）｝\\]]?)\\s*")
@@ -36,7 +36,7 @@ object SupertonicTTS {
     /** True while the Kokoro engine (Google's MediaPipe task) is serving requests in place of the native one. */
     @Volatile private var kokoroActive = false
 
-    @Synchronized
+    /** Lock-free: called from the UI thread while a worker may be synthesising under the engine locks. */
     fun isInitialized(modelPath: String): Boolean {
         if (KokoroEngine.isKokoroModelDir(modelPath)) return kokoroActive && KokoroEngine.isInitialized(modelPath)
         if (nativePtr == 0L || currentModelPath != modelPath) return false

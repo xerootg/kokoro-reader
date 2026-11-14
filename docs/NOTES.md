@@ -77,6 +77,22 @@ What was learned while turning the Supertonic TTS reader into a Kokoro-based aud
   has notification and headset controls (inherited from Supertonic).
 - The system text-to-speech service streams the same pieces to other apps, and lists all 54 Kokoro
   voices. Only the US and UK voices read English well; the others apply their accent to English text.
+- **The 2026-11-13 lock-up.** The phone's ANR record (dumpsys dropbox, 21:16) shows the UI thread
+  blocked in `KokoroEngine.isInitialized`, waiting for the engine's object lock, which a worker held
+  inside `synthesizeStreaming`; that worker was parked in the player's piece callback (`runBlocking
+  { channel.send }`, look-ahead full). The lock was held for a whole sentence including the callback,
+  so the UI froze for as long as playback took to drain the look-ahead, and the user force-stopped
+  the app from Settings at 22:06. Now `prepare()` runs under the lock, each piece's native call takes
+  the lock on its own (re-checking the engine was not released or re-made for another voice), the
+  callback runs unlocked, and `isInitialized` reads volatile fields without locking. The phone was
+  also swapping hard that night (Home Assistant OOM-ing, lmkd killing Teams and Gboard every few
+  minutes, the reader killed for LOW_MEMORY at 03:04 at 442 MB PSS); the reader's footprint with the
+  512 GPU bundle is about 950 MB PSS, half of it GPU buffers.
+- **16 KB page size.** Android 16 shows a "not 16 KB compatible" dialog for debuggable apps whose
+  native libraries have 4 KB LOAD segments. `libkokoro_tts_jni.so` is linked with
+  `-Wl,-z,max-page-size=16384` since release `kokoro-jni-v2`; the APK stores libraries uncompressed
+  (`useLegacyPackaging = false`) so the zip alignment check can see them. The Pixel 10a itself runs
+  4 KB pages, so the old build worked; 16 KB-page devices would have refused to load the library.
 
 ## Pronunciation lexicon
 
