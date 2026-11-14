@@ -1,0 +1,8 @@
+[package]
+name = "kokoro-hosttest"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Desktop test program for the on-device text-to-phoneme code.  No dependencies on purpose.
+[workspace]
