@@ -41,7 +41,6 @@ object KokoroEngine {
     private const val PIECE_SOFT_MIN = 45
     private const val GAP_COMMA_S = 0.16f
     private const val GAP_CLAUSE_S = 0.30f
-    private const val GAP_FORCED_S = 0.05f
     private const val GAP_SENTENCE_S = 0.45f
     private const val TRIM_THRESHOLD = 0.012f
     private const val TRIM_KEEP_S = 0.04f
@@ -198,6 +197,11 @@ object KokoroEngine {
         return first.isUpperCase() || first.isDigit() || last != '.'
     }
 
+    private val phraseStarters = ("about above across after against along although among and around as at because before " +
+        "behind below beside between but by down during except for from how if in into like near of off on onto or out " +
+        "over since so than that through to toward under until up upon what when where whether which while who whose " +
+        "why with without").split(" ").toSet()
+
     /** Cut text into pieces the task will not cut again, each with the gap (seconds) to put after it. */
     fun pieces(marked: String): List<Pair<String, Float>> {
         val tokens = tokenPattern.findAll(marked).map { it.value }.toList()
@@ -222,7 +226,23 @@ object KokoroEngine {
             // A sentence end inside the text: cut here ourselves, or the task cuts and keeps a second of silence.
             if (endsSentence(tok, next)) flush(GAP_SENTENCE_S)
             else if (gap != null && (length >= PIECE_SOFT_MIN || length + next.length + 1 > PIECE_LIMIT)) flush(gap)
-            else if (length + next.length + 1 > PIECE_LIMIT) flush(GAP_FORCED_S)
+            else if (length + next.length + 1 > PIECE_LIMIT) {
+                // Forced cut between words. Not wherever the limit falls (that split "Joe | Mondragón" and was
+                // heard as a long gap): back up to the last word a phrase can start with and carry the rest on.
+                fun lenTo(q: Int) = cur.take(q).sumOf { it.length } + q - 1
+                var j = (1 until cur.size).lastOrNull { cur[it].lowercase() in phraseStarters && lenTo(it) >= 30 } ?: -1
+                while (j > 1 && cur[j - 1].lowercase() in phraseStarters && lenTo(j - 1) >= 30) j--
+                if (j < 0) {                                  // no such word: at least keep a run of names together
+                    j = cur.size
+                    fun namey(t: String) = t.isNotEmpty() && (t[0].isUpperCase() || t[0] == '[')
+                    if (namey(next)) while (j > 1 && namey(cur[j - 1])) j--
+                    if (j <= 1) j = cur.size
+                }
+                val rest = cur.subList(j, cur.size).toList()
+                while (cur.size > j) cur.removeAt(cur.size - 1)
+                flush(0f)
+                cur.addAll(rest)
+            }
         }
         flush(0f)
         if (out.isNotEmpty()) out[out.size - 1] = out.last().first to 0f
