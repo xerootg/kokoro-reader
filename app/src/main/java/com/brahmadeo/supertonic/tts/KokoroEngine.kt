@@ -110,7 +110,9 @@ object KokoroEngine {
     private var tts: TextToSpeech? = null
     private var loadedModel: String? = null
     private var loadedRate = 1.0f
-    private var voices: Set<String> = emptySet()
+    private var voices: Set<String> = ALL_VOICES.toSet()
+    /** True when the MediaPipe task was not created at initialize() because the direct path will serve; it is made on demand. */
+    @Volatile private var taskDeferred = false
 
     /** The app keeps each model version in `<files>/<version>/onnx`; the Kokoro bundle sits beside that folder. */
     fun modelFileFor(onnxDir: String): File {
@@ -125,13 +127,24 @@ object KokoroEngine {
     fun isKokoroModelDir(onnxDir: String): Boolean = modelFileFor(onnxDir).let { it.exists() && it.length() > 0 }
 
     @Synchronized
-    fun isInitialized(onnxDir: String): Boolean = tts != null && loadedModel == modelFileFor(onnxDir).absolutePath
+    fun isInitialized(onnxDir: String): Boolean = (tts != null || taskDeferred) && loadedModel == modelFileFor(onnxDir).absolutePath
 
     @Synchronized
     fun initialize(onnxDir: String, speakingRate: Float = preferredRate): Boolean {
         val model = modelFileFor(onnxDir)
-        if (tts != null && loadedModel == model.absolutePath && abs(loadedRate - speakingRate) < 0.01f) return true
+        if ((tts != null || taskDeferred) && loadedModel == model.absolutePath && abs(loadedRate - speakingRate) < 0.01f) return true
         release()
+        if (abs(speakingRate - 1.0f) < 0.01f && KokoroNative.available && longModelFor(model.absolutePath) != null) {
+            // The direct path will do the work; the MediaPipe task (2 s, ~200 MB) is only made if ever needed.
+            loadedModel = model.absolutePath; loadedRate = speakingRate; taskDeferred = true
+            Log.i(TAG, "Kokoro: direct path available, MediaPipe task deferred")
+            return true
+        }
+        return createTask(model, speakingRate, onnxDir)
+    }
+
+    @Synchronized
+    private fun createTask(model: File, speakingRate: Float, onnxDir: String): Boolean {
         val t0 = android.os.SystemClock.elapsedRealtime()
         return try {
             val cache = File(model.parentFile, "cache").apply { mkdirs() }
@@ -149,6 +162,7 @@ object KokoroEngine {
             tts = created
             loadedModel = model.absolutePath
             loadedRate = speakingRate
+            taskDeferred = false
             Log.i(TAG, "Kokoro ready: ${model.name} delegate=${if (model.name == GPU_MODEL_FILE) "GPU" else "CPU"}, ${voices.size} voices, rate $speakingRate, " +
                 "load ${android.os.SystemClock.elapsedRealtime() - t0} ms, native heap ${android.os.Debug.getNativeHeapAllocatedSize() / 1048576} MB")
             true
@@ -168,6 +182,7 @@ object KokoroEngine {
         try { tts?.close() } catch (_: Throwable) {}
         tts = null
         loadedModel = null
+        taskDeferred = false
         releaseNative()
     }
 
@@ -247,7 +262,12 @@ object KokoroEngine {
         // Whole sentences per run when the direct binding and a long-bucket model are available.
         val longModel = if (longPathAvailable(modelPath, speed)) longModelFor(modelPath) else null
         val direct = longModel != null && ensureNative(longModel, voice)
-        val engine = if (direct) null else (tts ?: return 0)
+        val engine = if (direct) null else (tts ?: run {
+            // The task was deferred in favour of the direct path; make it now (speed changed, or the direct engine failed).
+            val onnxDir = File(File(modelPath).parentFile, "onnx").absolutePath
+            if (!createTask(File(modelPath), loadedRate, onnxDir)) return 0
+            tts ?: return 0
+        })
         val cut = if (direct) pieces(marked, LONG_PIECE_LIMIT, clauseCuts = false) else pieces(marked)
         // Counts only, never the text: enough to confirm the lexicon and the cutter are doing their job.
         Log.i(TAG, "synth voice=$voice chars=${text.length} lexiconRules=${LexiconManager.phonemeRules().size} " +
