@@ -40,3 +40,4 @@ app/src/main/assets/kokoro/en_dict.tsv
 app/src/main/assets/kokoro/en_context.tsv
 rust/hosttest/target/
 rust/hosttest/Cargo.lock
+tools/mp/.venv/
