@@ -50,6 +50,17 @@ What was learned while turning the Supertonic TTS reader into a Kokoro-based aud
   engine in about 1.2 s, and speaks each sentence of the test text as one piece (197 and 124
   characters). When the direct path is available the MediaPipe task is not created at all unless the
   speed is changed from 1.0, which saves 2 s and about 200 MB.
+- On the Pixel 10a GPU (2026-11-14) a 512-token run costs about 4.6 s whatever the sentence length
+  (319 characters, 14 s of speech: 4.7 s; 89 characters, 4.8 s of speech: 4.6 s), against about
+  1 s for a 128-token run. Memory with the 512 GPU bundle loaded: about 950 MB PSS, half GPU buffers.
+- **Hybrid short-sentence path.** Since a run is fixed-cost, `KokoroEngine` keeps a second direct
+  engine on Google's stock 128-token bundle (`shortDirect`, made on first use, "Fast short sentences"
+  in Playback Settings, `kokoro_fast_short`) and sends pieces of at most 80 plain characters (markup
+  collapsed to its word) there; longer pieces go to the 512 engine. If a short piece ever exceeds
+  128 tokens the runtime slices it as before, so nothing fails. The cache key names the bundle that
+  made the piece. Emulator (CPU, 2026-11-14): short pieces 2.6 s each against 13.1 s for a 181-character
+  piece on the 512 bundle; the second engine added 187 MB of native heap. On the phone's GPU the
+  short run should be about 1 s against 4.6 s; measure when it is next attached.
 
 ## Text handling in the app (`KokoroEngine.pieces`)
 

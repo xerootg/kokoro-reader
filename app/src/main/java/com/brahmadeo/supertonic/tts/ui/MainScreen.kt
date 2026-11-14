@@ -359,6 +359,7 @@ fun MainScreen(
                         )
 
                         KokoroGapSliders()
+                        KokoroFastShortSetting()
                         KokoroCacheSetting()
 
                         val sibilanceOptions = listOf(
@@ -653,6 +654,22 @@ fun KokoroGapSliders(onChanged: () -> Unit = {}) {
     )
 }
 
+
+/** Second direct engine on the stock bundle for short sentences: a quarter of the wait, about 300 MB more memory. */
+@Composable
+fun KokoroFastShortSetting() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val engine = com.brahmadeo.supertonic.tts.KokoroEngine
+    var on by remember { mutableStateOf(engine.fastShort) }
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text("Fast short sentences")
+            Text("Second engine for sentences under about 80 characters: a quarter of the wait, about 300 MB more memory.",
+                style = MaterialTheme.typography.bodySmall)
+        }
+        Switch(checked = on, onCheckedChange = { on = it; engine.setFastShort(context, it) })
+    }
+}
 
 /** Size cap of the synthesised-speech cache, with what it holds now. */
 @Composable

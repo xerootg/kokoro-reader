@@ -75,9 +75,20 @@ object KokoroEngine {
     private const val LONG_PIECE_LIMIT = 340
     private const val NATIVE_CHUNK_CHARS = 400          // the runtime's own limit, set above ours so it never cuts
 
-    private var native = 0L
-    private var nativeModel: String? = null
-    private var nativeVoice: String? = null
+    /** One direct LiteRT-LM engine: a bundle loaded for one voice. */
+    private class Direct(val model: String, val voice: String, val handle: Long)
+    /** The 512-token bundle, for whole sentences. */
+    @Volatile private var longDirect: Direct? = null
+    /** The stock 128-token bundle through the same binding, for short pieces: a run there costs about a
+     *  quarter of a 512-token run on the GPU (both are fixed-length), so short sentences stop paying the
+     *  long price. Made on first use; off when [fastShort] is false. */
+    @Volatile private var shortDirect: Direct? = null
+    @Volatile private var shortFailed = false
+    /** Plain characters (markup stripped) up to which a piece goes to the stock bundle: 128 tokens is about 90. */
+    private const val SHORT_PIECE_CHARS = 80
+    const val KEY_FAST_SHORT = "kokoro_fast_short"
+    /** Second engine for short sentences (about 300 MB more memory). */
+    @Volatile var fastShort = true
     const val GAP_COMMA_DEFAULT = 0.16f
     const val GAP_CLAUSE_DEFAULT = 0.30f
     const val GAP_SENTENCE_DEFAULT = 0.45f
@@ -102,7 +113,14 @@ object KokoroEngine {
         gapComma = p.getFloat(KEY_GAP_COMMA, GAP_COMMA_DEFAULT)
         gapClause = p.getFloat(KEY_GAP_CLAUSE, GAP_CLAUSE_DEFAULT)
         gapSentence = p.getFloat(KEY_GAP_SENTENCE, GAP_SENTENCE_DEFAULT)
+        fastShort = p.getBoolean(KEY_FAST_SHORT, true)
         if (appContext == null) { appContext = context.applicationContext; preferredRate = p.getFloat(KEY_LAST_RATE, 1.0f); AudioCache.init(context) }
+    }
+
+    fun setFastShort(context: android.content.Context, on: Boolean) {
+        fastShort = on
+        context.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE).edit().putBoolean(KEY_FAST_SHORT, on).apply()
+        if (!on) synchronized(this) { shortDirect?.let { destroy(it) }; shortDirect = null }
     }
     private const val TRIM_THRESHOLD = 0.012f
     private const val TRIM_KEEP_S = 0.04f
@@ -187,9 +205,11 @@ object KokoroEngine {
     }
 
     private fun releaseNative() {
-        if (native != 0L) { try { KokoroNative.nativeDestroy(native) } catch (_: Throwable) {} }
-        native = 0L; nativeModel = null; nativeVoice = null
+        longDirect?.let { destroy(it) }; longDirect = null
+        shortDirect?.let { destroy(it) }; shortDirect = null
     }
+
+    private fun destroy(d: Direct) { try { KokoroNative.nativeDestroy(d.handle) } catch (_: Throwable) {} }
 
     /** The long-bucket bundle beside the stock one, GPU build first, or null. */
     fun longModelFor(modelPath: String): File? {
@@ -202,22 +222,38 @@ object KokoroEngine {
     fun longPathAvailable(modelPath: String?, speed: Float): Boolean =
         modelPath != null && KokoroNative.available && longModelFor(modelPath) != null
 
-    /** Create (or re-create for a new voice) the direct engine. Returns false if it could not be made. */
+    /** Return [slot] if it already is [model] loaded for [voice]; otherwise replace it. Null if it could not be made. */
     @Synchronized
-    private fun ensureNative(model: File, voice: String): Boolean {
-        if (native != 0L && nativeModel == model.absolutePath && nativeVoice == voice) return true
-        releaseNative()
-        val cache = File(model.parentFile, "cache_native").apply { mkdirs() }
-        val backend = if (model.name == LONG_MODEL_GPU) KokoroNative.BACKEND_GPU else KokoroNative.BACKEND_CPU
+    private fun ensureDirect(slot: Direct?, model: File, voice: String, cacheName: String): Direct? {
+        if (slot != null && slot.model == model.absolutePath && slot.voice == voice) return slot
+        slot?.let { destroy(it) }
+        val cache = File(model.parentFile, cacheName).apply { mkdirs() }
+        val backend = if (model.name == LONG_MODEL_GPU || model.name == GPU_MODEL_FILE) KokoroNative.BACKEND_GPU else KokoroNative.BACKEND_CPU
         val t0 = android.os.SystemClock.elapsedRealtime()
-        native = try {
+        val handle = try {
             KokoroNative.nativeCreate(model.absolutePath, backend, cache.absolutePath, "en-US", voice, NATIVE_CHUNK_CHARS, true, 4)
         } catch (e: Throwable) { Log.e(TAG, "native create threw: ${e.message}"); 0L }
-        if (native == 0L) { Log.e(TAG, "direct engine failed for ${model.name}; using the MediaPipe task"); return false }
-        nativeModel = model.absolutePath; nativeVoice = voice
-        Log.i(TAG, "direct engine ready: ${model.name} backend=$backend voice=$voice load ${android.os.SystemClock.elapsedRealtime() - t0} ms")
-        return true
+        if (handle == 0L) { Log.e(TAG, "direct engine failed for ${model.name}"); return null }
+        Log.i(TAG, "direct engine ready: ${model.name} backend=$backend voice=$voice load ${android.os.SystemClock.elapsedRealtime() - t0} ms " +
+            "native heap ${android.os.Debug.getNativeHeapAllocatedSize() / 1048576} MB")
+        return Direct(model.absolutePath, voice, handle)
     }
+
+    /** The long engine for [voice], made or re-made as needed. */
+    private fun ensureLong(model: File, voice: String): Direct? =
+        ensureDirect(longDirect, model, voice, "cache_native").also { longDirect = it }
+
+    /** The short engine for [voice] on the stock bundle, or null (off, or it would not load: then the long one serves). */
+    private fun ensureShort(stock: File, voice: String): Direct? {
+        if (!fastShort || shortFailed) return null
+        val d = ensureDirect(shortDirect, stock, voice, "cache_native_short"); shortDirect = d
+        if (d == null) { shortFailed = true; Log.w(TAG, "short engine unavailable; everything goes through the long one") }
+        return d
+    }
+
+    private val markupToWord = Regex("""\[([^\]]*)]\(/[^/]*/\)""")
+    /** Characters the listener hears: markup collapsed to its word. */
+    private fun plainLength(piece: String) = markupToWord.replace(piece, "$1").length
 
     fun voiceIds(): Set<String> = voices
 
@@ -255,19 +291,25 @@ object KokoroEngine {
         var total = 0; var delivered = 0; var cached = 0
         val started = android.os.SystemClock.elapsedRealtime()
         val modelName = if (direct) longModel!!.name else File(modelPath).name
+        val stock = File(modelPath)
         for ((piece, gap) in cut) {
+            // Short pieces go to the stock bundle when the second engine is on and loads; the cache key names the bundle.
+            val short = direct && fastShort && !shortFailed && plainLength(piece) <= SHORT_PIECE_CHARS
             // The direct path always synthesises at normal speed and stretches afterwards, so its cache is speed-free.
-            val key = AudioCache.key(modelName, voice, if (direct) 1.0f else loadedRate, piece)
+            val key = AudioCache.key(if (short) stock.name else modelName, voice, if (direct) 1.0f else loadedRate, piece)
             var speech: ByteArray? = AudioCache.get(key)          // trimmed PCM without the gap
             if (speech != null) cached++ else {
                 val tp = android.os.SystemClock.elapsedRealtime()
+                var used = "task"
                 val samples = try {
                     synchronized(this) {
                         // Released or re-made for another voice while we were out of the lock? Then this sentence is over.
                         if (direct) {
-                            if (native == 0L || nativeModel != longModel!!.absolutePath || nativeVoice != voice) return delivered
-                            KokoroNative.nativeSynthesize(native, piece)
-                                ?: throw IllegalStateException(KokoroNative.nativeLastError(native))
+                            val d = (if (short) ensureShort(stock, voice) else null) ?: longDirect
+                            if (d == null || d.voice != voice) return delivered
+                            used = if (d === shortDirect) "short" else "long"
+                            KokoroNative.nativeSynthesize(d.handle, piece)
+                                ?: throw IllegalStateException(KokoroNative.nativeLastError(d.handle))
                         } else {
                             if (tts !== engine) return delivered
                             engine!!.synthesize(piece, SynthesisOptions(voiceId = voice)).samples
@@ -277,7 +319,7 @@ object KokoroEngine {
                     Log.e(TAG, "Synthesis failed for a piece of ${piece.length} characters: ${e.message}")
                     continue
                 }
-                Log.i(TAG, "piece chars=${piece.length} ms=${android.os.SystemClock.elapsedRealtime() - tp} audio=${"%.2f".format(samples.size / SAMPLE_RATE.toFloat())} s")
+                Log.i(TAG, "piece chars=${piece.length} engine=$used ms=${android.os.SystemClock.elapsedRealtime() - tp} audio=${"%.2f".format(samples.size / SAMPLE_RATE.toFloat())} s")
                 val trimmed = trim(samples)
                 if (trimmed.isEmpty()) continue
                 val b = ByteBuffer.allocate(trimmed.size * 2).order(ByteOrder.LITTLE_ENDIAN)
@@ -316,7 +358,7 @@ object KokoroEngine {
         val marked = applyPhonemeLexicon(text)
         // Whole sentences per run when the direct binding and a long-bucket model are available.
         val longModel = if (longPathAvailable(modelPath, speed)) longModelFor(modelPath) else null
-        val direct = longModel != null && ensureNative(longModel, voice)
+        val direct = longModel != null && ensureLong(longModel, voice) != null
         val engine = if (direct) null else (tts ?: run {
             // The task was deferred in favour of the direct path; make it now (speed changed, or the direct engine failed).
             val onnxDir = File(File(modelPath).parentFile, "onnx").absolutePath

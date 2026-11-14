@@ -47,6 +47,11 @@ parameter (built by CI of the `tools/LiteRT-LM` fork; the app build fetches it b
 from `gradle.properties`). With both present the engine speaks each sentence in one run; without
 either it uses the MediaPipe task. Speed on the direct path is a WSOLA time-stretch.
 
+**Short sentences on the stock bundle.** A run costs the same whatever the sentence length, and a
+512-token run costs about four times a 128-token one on the GPU. So a second direct engine on
+Google's stock bundle serves pieces under about 80 characters ("Fast short sentences" in Playback
+Settings, on by default, about 300 MB more memory); the 512 bundle takes the rest.
+
 CI (`.github/workflows/release.yml`) builds and signs an arm64 release APK on every push to `main` and on
 `v*` tags; tags also publish a GitHub release. Signing uses the repository secrets `KEYSTORE_BASE64`,
 `KEY_ALIAS`, `KEYSTORE_PASSWORD` and `KEY_PASSWORD`.

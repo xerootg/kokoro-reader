@@ -6,6 +6,7 @@
 #
 # With the optional fourth argument the long-bucket bundle is placed beside the stock one, so the app
 # takes the direct LiteRT-LM path (whole sentences per run) if libkokoro_tts_jni.so is in the APK.
+# TEXT=... in the environment replaces Kokoro Bench's built-in test passage.
 set -euo pipefail
 MODEL=$1; LEX=$2; OUT=$3; LONG=${4:-}
 export JAVA_HOME=${JAVA_HOME:-/usr/lib/jvm/java-21-openjdk-amd64}
@@ -28,7 +29,7 @@ $ADB push "$LEX" /data/local/tmp/user_lexicon.json | tail -1
 if [ -n "$LONG" ]; then $ADB push "$LONG" /data/local/tmp/kokoro_512_cpu.litertlm | tail -1; fi
 $ADB shell "run-as $FORK sh -c 'mkdir -p files/v1 && cp /data/local/tmp/kokoro_int8_fp16.litertlm files/v1/ && touch files/v1/.ready && cp /data/local/tmp/user_lexicon.json files/user_lexicon.json && ([ -f /data/local/tmp/kokoro_512_cpu.litertlm ] && cp /data/local/tmp/kokoro_512_cpu.litertlm files/v1/ || true) && ls -la files files/v1'" | tr -d '\r' | tail -8
 $ADB logcat -c
-$ADB shell am start -n $BENCH/.MainActivity -e mode tts -e engine $FORK | tail -1
+$ADB shell am start -n $BENCH/.MainActivity -e mode tts -e engine $FORK ${TEXT:+-e text "'"$TEXT"'"} | tail -1
 for i in $(seq 1 120); do $ADB logcat -d -s KOKOROBENCH 2>/dev/null | grep -q ' DONE ' && break; sleep 3; done
 echo "--- test app"; $ADB logcat -d -s KOKOROBENCH | sed -n 's/.*KOKOROBENCH: //p' | tee "$OUT/fork_bench.log"
 echo "--- fork"; $ADB logcat -d -s SupertonicTTS KokoroEngine KokoroNative AssetManager | sed -n 's/^[^ ]* [^ ]* *[0-9]* *[0-9]* \([A-Z] [A-Za-z]*\) *: /\1: /p' | cut -c1-220 | tail -25 | tee "$OUT/fork_app.log"
