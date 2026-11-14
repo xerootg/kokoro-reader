@@ -114,7 +114,10 @@ tasks.register('fetchKokoroJni') {
     def sha = project.findProperty('kokoroJni.sha256')?.toString()?.toLowerCase() ?: ''
     def local = file("src/main/jniLibs/${abi}/libkokoro_tts_jni.so")
     def out = layout.buildDirectory.file("kokoroJni/${abi}/libkokoro_tts_jni.so").get().asFile
+    inputs.property('url', url)
+    inputs.property('sha256', sha)
     outputs.file(out)
+    outputs.upToDateWhen { false }        // cheap: verifies the checksum, downloads only on a mismatch
     doLast {
         if (local.exists()) { out.delete(); println "fetchKokoroJni: using local ${local}"; return }
         if (!url) { out.delete(); println "fetchKokoroJni: no kokoroJni.url set; the app will use the MediaPipe task"; return }
