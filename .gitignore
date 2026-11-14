@@ -43,7 +43,6 @@ rust/hosttest/Cargo.lock
 tools/mp/.venv/
 # Kokoro LiteRT re-export toolchain: only scripts and notes are versioned
 tools/export/.venv/
-tools/export/LiteRT-Torch/
 tools/export/hf/
 tools/export/unpack/
 tools/export/out*/

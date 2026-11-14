@@ -994,7 +994,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 val oldMusicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
-                val oldAppDir = File(oldMusicDir, "Supertonic Audio")
+                val oldAppDir = File(oldMusicDir, "Kokoro Reader")
                 val newAppDir = getExternalFilesDir(Environment.DIRECTORY_MUSIC) ?: File(filesDir, "Music")
                 
                 if (!oldAppDir.exists()) {

@@ -8,7 +8,7 @@ MODEL=$1; LEX=$2; OUT=$3
 export JAVA_HOME=${JAVA_HOME:-/usr/lib/jvm/java-21-openjdk-amd64}
 export ANDROID_HOME=${ANDROID_HOME:-$HOME/Android/Sdk} ANDROID_SDK_ROOT=${ANDROID_HOME:-$HOME/Android/Sdk}
 AVD=kokorobench; PORT=5584; SERIAL=emulator-$PORT; ADB="adb -s $SERIAL"
-BENCH=dev.milagro.kokorobench; FORK=com.brahmadeo.supertonic.tts.kokoro
+BENCH=dev.milagro.kokorobench; FORK=io.github.xerootg.kokororeader
 HERE=$(cd "$(dirname "$0")" && pwd)
 mkdir -p "$OUT"
 "$ANDROID_HOME/emulator/emulator" -avd "$AVD" -port $PORT -no-window -no-audio -no-boot-anim -no-snapshot \

@@ -1,0 +1,4 @@
+[submodule "tools/export/LiteRT-Torch"]
+	path = tools/export/LiteRT-Torch
+	url = git@github.com:xerootg/litert-torch.git
+	branch = kokoro-bucket-512

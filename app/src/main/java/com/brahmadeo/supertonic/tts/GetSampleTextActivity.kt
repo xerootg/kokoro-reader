@@ -27,7 +27,7 @@ class GetSampleTextActivity : Activity() {
         if (language.startsWith("en")) {
             result.putExtra(
                 TextToSpeech.Engine.EXTRA_SAMPLE_TEXT,
-                "This is an example of speech synthesis using Supertonic."
+                "This is an example of speech synthesis using Kokoro Reader."
             )
         }
         setResult(TextToSpeech.LANG_AVAILABLE, result)

@@ -1,8 +1,8 @@
 <resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
-    <string name="app_name">Supertonic TTS</string>
+    <string name="app_name">Kokoro Reader</string>
     
     <!-- Main Activity -->
-    <string name="default_input_text">Hello world, this is Supertonic TTS on Android. Select a voice and speed below!</string>
+    <string name="default_input_text">Hello world, this is Kokoro Reader on Android. Select a voice and speed below!</string>
     <string name="voice_style_label">Voice Style</string>
     <string name="mix_voices_label">Mix Voices</string>
     <string name="voice_style_2_label">Secondary Voice</string>

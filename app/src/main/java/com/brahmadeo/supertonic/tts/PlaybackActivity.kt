@@ -506,7 +506,7 @@ class PlaybackActivity : ComponentActivity() {
         val cleanText = text.trim()
         if (cleanText.isEmpty()) {
             val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-            return "Supertonic_TTS_$timestamp.wav"
+            return "KokoroReader_$timestamp.wav"
         }
         
         // Split by whitespace and grab up to 5 words
@@ -518,7 +518,7 @@ class PlaybackActivity : ComponentActivity() {
         }.filter { it.isNotEmpty() }
         
         val baseName = if (sanitizedWords.isEmpty()) {
-            "Supertonic_TTS"
+            "KokoroReader"
         } else {
             sanitizedWords.joinToString("_")
         }
