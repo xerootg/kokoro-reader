@@ -74,12 +74,15 @@ class MainActivity : Activity() {
 
     private fun say(s: String) {
         Log.i(tag, s)
+        // Also to a file: logcat over a flaky USB link loses lines, a file can be pulled afterwards.
+        try { File(filesDir, "bench_log.txt").appendText(s + "\n") } catch (_: Throwable) {}
         runOnUiThread { view.append(s + "\n") }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         view = TextView(this).apply { setPadding(32, 96, 32, 32); textSize = 13f }
+        try { File(filesDir, "bench_log.txt").delete() } catch (_: Throwable) {}
         setContentView(ScrollView(this).apply { addView(view) })
         val model = intent.getStringExtra("model") ?: "kokoro_int8_fp16.litertlm"
         val delegate = (intent.getStringExtra("delegate") ?: "cpu").lowercase()
@@ -109,6 +112,7 @@ class MainActivity : Activity() {
             )
             val tts = TextToSpeech.create(options)
             say("LOADED ms=${(System.nanoTime() - t0) / 1_000_000}")
+            if (intent.getStringExtra("mode") == "stream") { streamTest(tts, voice); tts.close(); say("DONE ok"); return }
             for (i in 0..runs) {                       // run 0 is the warm-up
                 val t = System.nanoTime()
                 val r = tts.synthesize(paragraph, SynthesisOptions(voiceId = voice))
@@ -129,6 +133,37 @@ class MainActivity : Activity() {
             say("DONE error=${e.javaClass.simpleName}: ${e.message?.take(300)}")
             Log.e(tag, "failed", e)
         }
+    }
+
+    /** Where does the time go: per call, per stream, or per chunk?  Logs when each streamed chunk arrives. */
+    private fun streamTest(tts: TextToSpeech, voice: String) {
+        val opt = SynthesisOptions(voiceId = voice)
+        fun ms(t: Long) = (System.nanoTime() - t) / 1_000_000
+        val short = "We walked slowly up the road."
+        for (i in 0..1) { val t = System.nanoTime(); val r = tts.synthesize(short, opt)
+            say("CALL short i=$i ms=${ms(t)} audio_s=${"%.2f".format(r.samples.size.toFloat() / r.sampleRateHz)}") }
+        fun drain(label: String, stream: com.google.mediapipe.tasks.audio.texttospeech.TtsStream, t0: Long) {
+            var last = t0; var n = 0; var total = 0f
+            while (true) {
+                val c = stream.readNext() ?: break
+                val a = c.samples.size.toFloat() / c.sampleRateHz; total += a
+                say("$label chunk=${c.chunkIndex} at_ms=${ms(t0)} wait_ms=${ms(last)} audio_s=${"%.2f".format(a)} final=${c.isFinal}")
+                last = System.nanoTime(); n++
+                if (c.isFinal || n > 200) break
+            }
+            say("$label total_ms=${ms(t0)} audio_s=${"%.2f".format(total)} chunks=$n")
+            stream.close()
+        }
+        for (i in 0..1) { val t = System.nanoTime(); val st1 = tts.openStream(paragraph, opt); st1.finishInput(); drain("STREAM-ONE-TEXT i=$i", st1, t) }
+        // one stream fed sentence by sentence, as a reader would
+        val parts = paragraph.split(Regex("(?<=[.!?])\\s+")).filter { it.isNotBlank() }
+        val t = System.nanoTime(); val st = tts.openStream(opt)
+        say("STREAM-PUSH opened_ms=${ms(t)} parts=${parts.size}")
+        for (p in parts) st.pushText("$p ")
+        st.finishInput()
+        drain("STREAM-PUSH", st, t)
+        val t2 = System.nanoTime(); val r = tts.synthesize(paragraph, opt)
+        say("CALL paragraph ms=${ms(t2)} audio_s=${"%.2f".format(r.samples.size.toFloat() / r.sampleRateHz)}")
     }
 
     private fun writeWav(f: File, samples: FloatArray, rate: Int) {

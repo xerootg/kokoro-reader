@@ -28,6 +28,14 @@
         android:theme="@style/Theme.Supertonic"
         android:intentMatchingFlags="enforceIntentFilter"
         tools:targetApi="37">
+        <!-- Without these an Android 12+ app cannot load the vendor GPU/TPU libraries, and the Kokoro task
+             silently drops to an OpenGL path that does most of the work on the CPU (measured: 2x slower). -->
+        <uses-native-library android:name="libOpenCL.so" android:required="false" />
+        <uses-native-library android:name="libOpenCL-pixel.so" android:required="false" />
+        <uses-native-library android:name="libedgetpu_litert.so" android:required="false" />
+        <uses-native-library android:name="libedgetpu_client.google.so" android:required="false" />
+        <uses-native-library android:name="libedgetpu_util.so" android:required="false" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

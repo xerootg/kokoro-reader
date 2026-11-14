@@ -96,6 +96,7 @@ object KokoroEngine {
         val model = modelFileFor(onnxDir)
         if (tts != null && loadedModel == model.absolutePath && abs(loadedRate - speakingRate) < 0.01f) return true
         release()
+        val t0 = android.os.SystemClock.elapsedRealtime()
         return try {
             val cache = File(model.parentFile, "cache").apply { mkdirs() }
             val options = TextToSpeechOptions(
@@ -112,7 +113,8 @@ object KokoroEngine {
             tts = created
             loadedModel = model.absolutePath
             loadedRate = speakingRate
-            Log.i(TAG, "Kokoro ready: ${model.name}, ${voices.size} voices, rate $speakingRate")
+            Log.i(TAG, "Kokoro ready: ${model.name} delegate=${if (model.name == GPU_MODEL_FILE) "GPU" else "CPU"}, ${voices.size} voices, rate $speakingRate, " +
+                "load ${android.os.SystemClock.elapsedRealtime() - t0} ms, native heap ${android.os.Debug.getNativeHeapAllocatedSize() / 1048576} MB")
             true
         } catch (e: Throwable) {
             Log.e(TAG, "Kokoro initialisation failed for ${model.name}: ${e.message}", e)
@@ -167,12 +169,15 @@ object KokoroEngine {
         var total = 0
         val started = android.os.SystemClock.elapsedRealtime()
         for ((piece, gap) in cut) {
+            val tp = android.os.SystemClock.elapsedRealtime()
             val samples = try {
                 engine.synthesize(piece, SynthesisOptions(voiceId = voice)).samples
             } catch (e: Throwable) {
                 Log.e(TAG, "Synthesis failed for a piece of ${piece.length} characters: ${e.message}")
                 continue
             }
+            Log.i(TAG, "piece chars=${piece.length} ms=${android.os.SystemClock.elapsedRealtime() - tp} audio=${"%.2f".format(samples.size / SAMPLE_RATE.toFloat())} s " +
+                "thread=${Thread.currentThread().name} prio=${android.os.Process.getThreadPriority(android.os.Process.myTid())}")
             val trimmed = trim(samples)
             if (trimmed.isEmpty()) continue
             out.add(trimmed); total += trimmed.size
