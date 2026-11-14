@@ -33,6 +33,9 @@ import kotlin.math.abs
 object KokoroEngine {
     private const val TAG = "KokoroEngine"
     const val SAMPLE_RATE = 24000
+    /** Built for the GPU. Measured on a Pixel 10a (Tensor G4): 21 s of speech in 5.5 s, against 41 s on the CPU. */
+    const val GPU_MODEL_FILE = "kokoro_int8_gpu_fp16.litertlm"
+    /** CPU build: the fallback when the GPU one is missing or fails to load. Slower than real time on that phone. */
     const val MODEL_FILE = "kokoro_int8_fp16.litertlm"
     const val DEFAULT_VOICE = "am_michael"
 
@@ -51,7 +54,14 @@ object KokoroEngine {
     private var voices: Set<String> = emptySet()
 
     /** The app keeps each model version in `<files>/<version>/onnx`; the Kokoro bundle sits beside that folder. */
-    fun modelFileFor(onnxDir: String): File = File(File(onnxDir).parentFile ?: File(onnxDir), MODEL_FILE)
+    fun modelFileFor(onnxDir: String): File {
+        val dir = File(onnxDir).parentFile ?: File(onnxDir)
+        val gpu = File(dir, GPU_MODEL_FILE)
+        return if (gpu.exists() && gpu.length() > 0 && !gpuFailed) gpu else File(dir, MODEL_FILE)
+    }
+
+    /** Set when the GPU build would not load, so the CPU build is used for the rest of this run. */
+    @Volatile private var gpuFailed = false
 
     fun isKokoroModelDir(onnxDir: String): Boolean = modelFileFor(onnxDir).let { it.exists() && it.length() > 0 }
 
@@ -68,7 +78,7 @@ object KokoroEngine {
             val options = TextToSpeechOptions(
                 baseOptions = BaseOptions.builder()
                     .setModelAssetPath(model.absolutePath)
-                    .setDelegate(Delegate.CPU)
+                    .setDelegate(if (model.name == GPU_MODEL_FILE) Delegate.GPU else Delegate.CPU)
                     .build(),
                 defaultVoiceId = DEFAULT_VOICE,
                 speakingRate = speakingRate,
@@ -82,8 +92,12 @@ object KokoroEngine {
             Log.i(TAG, "Kokoro ready: ${model.name}, ${voices.size} voices, rate $speakingRate")
             true
         } catch (e: Throwable) {
-            Log.e(TAG, "Kokoro initialisation failed: ${e.message}", e)
+            Log.e(TAG, "Kokoro initialisation failed for ${model.name}: ${e.message}", e)
             tts = null; loadedModel = null
+            if (model.name == GPU_MODEL_FILE && !gpuFailed) {
+                gpuFailed = true                       // try once more with the CPU build, if it is there
+                if (isKokoroModelDir(onnxDir)) return initialize(onnxDir, speakingRate)
+            }
             false
         }
     }

@@ -34,7 +34,7 @@ object AssetManager {
     private const val BUFFER_SIZE = 65_536
 
 
-    private val V1_FILES = listOf(KokoroEngine.MODEL_FILE)
+    private val V1_FILES = listOf(KokoroEngine.GPU_MODEL_FILE)
 
     /**
      * The app lists voices by looking for `<version>/voice_styles/<name>.json` and loads a model from
