@@ -148,7 +148,22 @@ object KokoroEngine {
      */
     @Synchronized
     fun synthesize(text: String, stylePath: String, speed: Float): ByteArray? {
-        val modelPath = loadedModel ?: return null
+        val out = ArrayList<ByteArray>()
+        synthesizeStreaming(text, stylePath, speed) { out.add(it) }
+        if (out.isEmpty()) return null
+        val all = ByteArray(out.sumOf { it.size }); var at = 0
+        for (b in out) { System.arraycopy(b, 0, all, at, b.size); at += b.size }
+        return all
+    }
+
+    /**
+     * Like [synthesize], but each piece (about one clause, 1-4 s of speech) goes to [onPiece] as soon as the
+     * engine has made it, with its gap appended, so playback can start after the first piece instead of the
+     * whole text. Returns the number of pieces delivered.
+     */
+    @Synchronized
+    fun synthesizeStreaming(text: String, stylePath: String, speed: Float, onPiece: (ByteArray) -> Unit): Int {
+        val modelPath = loadedModel ?: return 0
         // The task takes its speaking rate when it is created, so a new rate means a new task.
         if (abs(speed - preferredRate) >= 0.01f) {
             preferredRate = speed
@@ -156,17 +171,16 @@ object KokoroEngine {
         }
         if (abs(speed - loadedRate) >= 0.01f) {
             val onnxDir = File(File(modelPath).parentFile, "onnx").absolutePath
-            if (!initialize(onnxDir, speed)) return null
+            if (!initialize(onnxDir, speed)) return 0
         }
-        val engine = tts ?: return null
+        val engine = tts ?: return 0
         val voice = voiceFromStylePath(stylePath)
         val marked = applyPhonemeLexicon(text)
         val cut = pieces(marked)
         // Counts only, never the text: enough to confirm the lexicon and the cutter are doing their job.
         Log.i(TAG, "synth voice=$voice chars=${text.length} lexiconRules=${LexiconManager.phonemeRules().size} " +
             "pinned=${markupSpan.findAll(marked).count()} pieces=${cut.size} longestPiece=${cut.maxOfOrNull { it.first.length } ?: 0}")
-        val out = ArrayList<FloatArray>()
-        var total = 0
+        var total = 0; var delivered = 0
         val started = android.os.SystemClock.elapsedRealtime()
         for ((piece, gap) in cut) {
             val tp = android.os.SystemClock.elapsedRealtime()
@@ -180,16 +194,16 @@ object KokoroEngine {
                 "thread=${Thread.currentThread().name} prio=${android.os.Process.getThreadPriority(android.os.Process.myTid())}")
             val trimmed = trim(samples)
             if (trimmed.isEmpty()) continue
-            out.add(trimmed); total += trimmed.size
-            val gapSamples = (gap * SAMPLE_RATE).toInt()
-            if (gapSamples > 0) { out.add(FloatArray(gapSamples)); total += gapSamples }
+            val gapSamples = (gap * SAMPLE_RATE).toInt().coerceAtLeast(0)
+            val pcm = ByteBuffer.allocate((trimmed.size + gapSamples) * 2).order(ByteOrder.LITTLE_ENDIAN)
+            for (s in trimmed) pcm.putShort((s.coerceIn(-1f, 1f) * 32767f).toInt().toShort())
+            repeat(gapSamples) { pcm.putShort(0) }
+            total += trimmed.size + gapSamples; delivered++
+            onPiece(pcm.array())
         }
-        if (total == 0) return null
         val ms = android.os.SystemClock.elapsedRealtime() - started
-        Log.i(TAG, "synth done in $ms ms for ${"%.1f".format(total / SAMPLE_RATE.toFloat())} s of audio")
-        val pcm = ByteBuffer.allocate(total * 2).order(ByteOrder.LITTLE_ENDIAN)
-        for (chunk in out) for (s in chunk) pcm.putShort((s.coerceIn(-1f, 1f) * 32767f).toInt().toShort())
-        return pcm.array()
+        Log.i(TAG, "synth done in $ms ms for ${"%.1f".format(total / SAMPLE_RATE.toFloat())} s of audio, $delivered pieces")
+        return delivered
     }
 
     // --- pronunciation -------------------------------------------------------------------------

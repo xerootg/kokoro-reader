@@ -367,9 +367,8 @@ class SupertonicTextToSpeechService : TextToSpeechService() {
                 val sibilanceMode = prefs.getInt("sibilance_reduction_mode", 1)
                 val normalizedText = textNormalizer.normalize(sentence, requestedLang, isAdvancedEnabled)
 
-                val audioData = SupertonicTTS.generateAudio(normalizedText, requestedLang, stylePath, effectiveSpeed, 0.0f, steps, VOLUME_BOOST_FACTOR, null, sibilanceMode)
-
-                if (audioData != null && audioData.isNotEmpty()) {
+                // Each piece goes to the caller as soon as it is made (Kokoro: a clause at a time).
+                SupertonicTTS.generateAudioStreaming(normalizedText, requestedLang, stylePath, effectiveSpeed, steps, VOLUME_BOOST_FACTOR, sibilanceMode) { audioData ->
                     var offset = 0
                     while (offset < audioData.size) {
                         val length = 4096.coerceAtMost(audioData.size - offset)

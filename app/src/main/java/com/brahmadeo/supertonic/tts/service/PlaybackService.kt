@@ -182,6 +182,8 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
     private var cachedBookPath: String? = null
 
     companion object {
+        const val PRE_BUFFER_CHUNKS = 2       // pieces made before playback starts
+        const val LOOK_AHEAD_CHUNKS = 24      // pieces the producer may run ahead
         const val CHANNEL_ID = "supertonic_playback"
         const val NOTIFICATION_ID = 1
         const val TAG = "PlaybackService"
@@ -291,8 +293,8 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
             }
 
             synthesisJob = launch(Dispatchers.IO) {
-                // Channel size 10 to allow producer to stay ahead
-                val channel = kotlinx.coroutines.channels.Channel<PlaybackItem>(10)
+                // Look-ahead: up to this many pieces (a piece is a clause, 1-4 s of speech)
+                val channel = kotlinx.coroutines.channels.Channel<PlaybackItem>(LOOK_AHEAD_CHUNKS)
                 val preBufferComplete = CompletableDeferred<Unit>()
 
                 // Producer
@@ -314,18 +316,17 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                         val sibilanceMode = prefs.getInt("sibilance_reduction_mode", 1)
                         val normalizedText = textNormalizer.normalize(sentence, sentenceLang, isAdvancedEnabled)
 
-                        val audioData = SupertonicTTS.generateAudio(
-                            normalizedText, sentenceLang, stylePath, speed, 0.0f, steps, VOLUME_BOOST_FACTOR, null, sibilanceMode
-                        )
-                        
-                        if (audioData != null && audioData.isNotEmpty()) {
-                            channel.send(PlaybackItem(index, audioData))
+                        // Streams: Kokoro hands over a clause at a time, so the first sound comes after one or two
+                        // pieces (a second or two) instead of after three whole sentences. The channel holds the
+                        // look-ahead; send() parks the producer when it is full.
+                        SupertonicTTS.generateAudioStreaming(
+                            normalizedText, sentenceLang, stylePath, speed, steps, VOLUME_BOOST_FACTOR, sibilanceMode
+                        ) { chunk ->
+                            kotlinx.coroutines.runBlocking { channel.send(PlaybackItem(index, chunk)) }
                             producedCount++
-                            
-                            // Signal pre-buffer complete when 3 chunks are ready (2 in buffer)
-                            if (producedCount >= 3 && !preBufferComplete.isCompleted) {
+                            if (producedCount >= PRE_BUFFER_CHUNKS && !preBufferComplete.isCompleted) {
                                 preBufferComplete.complete(Unit)
-                                Log.d(TAG, "Pre-buffer complete: 3 chunks ready")
+                                Log.d(TAG, "Pre-buffer complete: $PRE_BUFFER_CHUNKS chunks ready")
                             }
                         }
                     }

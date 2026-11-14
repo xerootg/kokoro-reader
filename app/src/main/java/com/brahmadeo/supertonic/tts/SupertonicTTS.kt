@@ -136,6 +136,27 @@ object SupertonicTTS {
         sibilanceMode: Int = this.sibilanceMode
     ): ByteArray? {
         if (kokoroActive) return KokoroEngine.synthesize(text, stylePath, speed)
+        return generateAudioNative(text, lang, stylePath, speed, bufferDuration, steps, gain, listener, sibilanceMode)
+    }
+
+    /**
+     * Streaming form of [generateAudio]: [onChunk] receives playable 16-bit PCM as it is produced. Kokoro hands
+     * over a clause at a time; the native engine delivers its whole answer in one call. Returns the chunk count.
+     */
+    fun generateAudioStreaming(
+        text: String, lang: String, stylePath: String, speed: Float, steps: Int, gain: Float, sibilanceMode: Int,
+        onChunk: (ByteArray) -> Unit
+    ): Int {
+        if (kokoroActive) return KokoroEngine.synthesizeStreaming(text, stylePath, speed, onChunk)
+        val data = generateAudio(text, lang, stylePath, speed, 0.0f, steps, gain, null, sibilanceMode) ?: return 0
+        if (data.isEmpty()) return 0
+        onChunk(data); return 1
+    }
+
+    private fun generateAudioNative(
+        text: String, lang: String, stylePath: String, speed: Float, bufferDuration: Float, steps: Int, gain: Float,
+        listener: ProgressListener?, sibilanceMode: Int
+    ): ByteArray? {
         if (nativePtr == 0L) {
             Log.e("SupertonicTTS", "Engine not initialized")
             return null
