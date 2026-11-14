@@ -25,6 +25,7 @@ object LexiconManager {
     @Volatile private var isLoaded = false
 
     fun load(context: Context): List<LexiconItem> {
+        com.brahmadeo.supertonic.tts.KokoroEngine.loadGaps(context)   // every screen and service passes through here
         // Always reload from file if not loaded or if requested, 
         // but for performance we cache.
         if (isLoaded) return cachedRules

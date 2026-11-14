@@ -42,9 +42,26 @@ object KokoroEngine {
     /** Raw characters per piece, markup included. The task force-cuts near 90. */
     private const val PIECE_LIMIT = 80
     private const val PIECE_SOFT_MIN = 45
-    private const val GAP_COMMA_S = 0.16f
-    private const val GAP_CLAUSE_S = 0.30f
-    private const val GAP_SENTENCE_S = 0.45f
+    const val GAP_COMMA_DEFAULT = 0.16f
+    const val GAP_CLAUSE_DEFAULT = 0.30f
+    const val GAP_SENTENCE_DEFAULT = 0.45f
+    const val PREFS = "SupertonicPrefs"
+    const val KEY_GAP_COMMA = "kokoro_gap_comma"
+    const val KEY_GAP_CLAUSE = "kokoro_gap_clause"
+    const val KEY_GAP_SENTENCE = "kokoro_gap_sentence"
+
+    /** Silence, in seconds, after a comma / after a semicolon, colon or dash / between sentences. Set from the sliders. */
+    @Volatile var gapComma = GAP_COMMA_DEFAULT
+    @Volatile var gapClause = GAP_CLAUSE_DEFAULT
+    @Volatile var gapSentence = GAP_SENTENCE_DEFAULT
+
+    /** Read the saved gaps. Called wherever the app loads its lexicon, so the speech service has them too. */
+    fun loadGaps(context: android.content.Context) {
+        val p = context.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE)
+        gapComma = p.getFloat(KEY_GAP_COMMA, GAP_COMMA_DEFAULT)
+        gapClause = p.getFloat(KEY_GAP_CLAUSE, GAP_CLAUSE_DEFAULT)
+        gapSentence = p.getFloat(KEY_GAP_SENTENCE, GAP_SENTENCE_DEFAULT)
+    }
     private const val TRIM_THRESHOLD = 0.012f
     private const val TRIM_KEEP_S = 0.04f
 
@@ -196,7 +213,7 @@ object KokoroEngine {
     // --- pieces and gaps -----------------------------------------------------------------------
 
     private val tokenPattern = Regex("""\[[^\]]*]\(/[^/]*/\)\S*|\S+""")
-    private val clauseGap = mapOf(',' to GAP_COMMA_S, ';' to GAP_CLAUSE_S, ':' to GAP_CLAUSE_S, '—' to GAP_CLAUSE_S)
+    private fun clauseGap(c: Char?): Float? = when (c) { ',' -> gapComma; ';', ':', '—' -> gapClause; else -> null }
     private val abbreviations = setOf("mr.", "mrs.", "ms.", "dr.", "st.", "sr.", "jr.", "prof.", "gen.", "col.", "capt.",
         "sgt.", "lt.", "rev.", "hon.", "no.", "vs.", "etc.", "e.g.", "i.e.", "u.s.")
 
@@ -236,9 +253,9 @@ object KokoroEngine {
             val length = cur.sumOf { it.length } + cur.size - 1
             val last = if (tok == "—") '—' else tok.trimEnd('"', '”', '’', '\'', ')').lastOrNull()
             val next = tokens.getOrNull(k + 1) ?: ""
-            val gap = clauseGap[last]
+            val gap = clauseGap(last)
             // A sentence end inside the text: cut here ourselves, or the task cuts and keeps a second of silence.
-            if (endsSentence(tok, next)) flush(GAP_SENTENCE_S)
+            if (endsSentence(tok, next)) flush(gapSentence)
             else if (gap != null && (length >= PIECE_SOFT_MIN || length + next.length + 1 > PIECE_LIMIT)) flush(gap)
             else if (length + next.length + 1 > PIECE_LIMIT) {
                 // Forced cut between words. Not wherever the limit falls (that split "Joe | Mondragón" and was

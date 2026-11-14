@@ -355,6 +355,8 @@ fun MainScreen(
                             displayValue = "$steps steps"
                         )
 
+                        KokoroGapSliders()
+
                         val sibilanceOptions = listOf(
                             stringResource(AppR.string.sibilance_off),
                             stringResource(AppR.string.sibilance_deesser_recommended),
@@ -615,4 +617,32 @@ fun MainScreenPreview() {
             onMiniPlayerPlayPauseClick = {}
         )
     }
+}
+
+
+/** Kokoro pauses: how long the reader waits at a comma, at a semicolon / colon / dash, and between sentences. */
+@Composable
+fun KokoroGapSliders() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val prefs = remember { context.getSharedPreferences(com.brahmadeo.supertonic.tts.KokoroEngine.PREFS, android.content.Context.MODE_PRIVATE) }
+    val engine = com.brahmadeo.supertonic.tts.KokoroEngine
+    var comma by remember { mutableStateOf(prefs.getFloat(engine.KEY_GAP_COMMA, engine.GAP_COMMA_DEFAULT)) }
+    var clause by remember { mutableStateOf(prefs.getFloat(engine.KEY_GAP_CLAUSE, engine.GAP_CLAUSE_DEFAULT)) }
+    var sentence by remember { mutableStateOf(prefs.getFloat(engine.KEY_GAP_SENTENCE, engine.GAP_SENTENCE_DEFAULT)) }
+    fun round(v: Float) = Math.round(v * 100f) / 100f
+    SliderWithLabel(
+        label = "Pause at a comma", value = comma,
+        onValueChange = { comma = round(it); engine.gapComma = comma; prefs.edit().putFloat(engine.KEY_GAP_COMMA, comma).apply() },
+        valueRange = 0f..0.6f, steps = 29, displayValue = String.format(Locale.US, "%.2f s", comma)
+    )
+    SliderWithLabel(
+        label = "Pause at a semicolon or dash", value = clause,
+        onValueChange = { clause = round(it); engine.gapClause = clause; prefs.edit().putFloat(engine.KEY_GAP_CLAUSE, clause).apply() },
+        valueRange = 0f..1f, steps = 49, displayValue = String.format(Locale.US, "%.2f s", clause)
+    )
+    SliderWithLabel(
+        label = "Pause between sentences", value = sentence,
+        onValueChange = { sentence = round(it); engine.gapSentence = sentence; prefs.edit().putFloat(engine.KEY_GAP_SENTENCE, sentence).apply() },
+        valueRange = 0f..1.5f, steps = 74, displayValue = String.format(Locale.US, "%.2f s", sentence)
+    )
 }
