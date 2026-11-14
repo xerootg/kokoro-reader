@@ -18,3 +18,12 @@
 
 # Fix: Missing classes detected while running R8 (Missing JP2Decoder from Readium/PDFium)
 -dontwarn com.gemalto.jp2.JP2Decoder
+
+# MediaPipe's task options are protobuf-lite messages whose fields are read by reflection
+# ("Field useAdvancedGpuApi_ for as1 not found" in the first shrunk release build, 2026-11-14).
+-keep class com.google.mediapipe.** { *; }
+-keep class com.google.protobuf.** { *; }
+-keep class * extends com.google.protobuf.GeneratedMessageLite { *; }
+-dontwarn com.google.mediapipe.**
+# The direct LiteRT-LM binding: JNI looks the class and its methods up by name.
+-keep class com.brahmadeo.supertonic.tts.KokoroNative { *; }
