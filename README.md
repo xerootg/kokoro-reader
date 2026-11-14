@@ -35,7 +35,17 @@ Requirements: JDK 17 or 21, Android SDK platform 37 with NDK r29, Rust (stable) 
 Install to one profile only on a phone with a work profile: `adb install --user 0 -r app/build/outputs/apk/debug/app-debug.apk`.
 
 The Kokoro model is downloaded by the app on first use (about 295 MB). To place it by hand, copy
-`kokoro_int8_gpu_fp16.litertlm` (or the CPU file) into the app's `files/v1/` directory.
+`kokoro_int8_gpu_fp16.litertlm` (or the CPU file) into the app's `files/v1/` directory;
+`bench/phone_install.sh` does that over adb, together with the lexicon and a book.
+
+**Whole sentences per run.** Google's bundle is compiled for 128 phoneme tokens (about 90
+characters), and its runtime cuts longer text into chunks spoken as separate utterances, which
+spoils the cadence inside long sentences. The fix has two parts, both optional: a model re-exported
+with a 512-token bucket (`tools/export`, placed as `files/v1/kokoro_512_gpu.litertlm`) and
+`libkokoro_tts_jni.so`, a direct binding to LiteRT-LM's C++ engine with the chunk size as a
+parameter (built by CI of the `tools/LiteRT-LM` fork; the app build fetches it by URL and SHA-256
+from `gradle.properties`). With both present the engine speaks each sentence in one run; without
+either it uses the MediaPipe task. Speed on the direct path is a WSOLA time-stretch.
 
 CI (`.github/workflows/release.yml`) builds and signs an arm64 release APK on every push to `main` and on
 `v*` tags; tags also publish a GitHub release. Signing uses the repository secrets `KEYSTORE_BASE64`,
