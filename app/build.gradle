@@ -103,6 +103,31 @@ tasks.register('copyRustLibs', Sync) {
     }
 }
 
+// --- KOKORO JNI (LiteRT-LM direct binding) ---
+// libkokoro_tts_jni.so is built by CI of the LiteRT-LM fork (tools/LiteRT-LM, workflow kokoro-jni.yml)
+// and fetched here by URL + SHA-256 from gradle.properties, so no binary lives in this repo. A copy in
+// src/main/jniLibs/<abi>/ (git-ignored) takes precedence for local builds. Without either, the app
+// uses the MediaPipe task and its ~100-character chunks.
+tasks.register('fetchKokoroJni') {
+    def abi = 'arm64-v8a'
+    def url = project.findProperty('kokoroJni.url')?.toString() ?: ''
+    def sha = project.findProperty('kokoroJni.sha256')?.toString()?.toLowerCase() ?: ''
+    def local = file("src/main/jniLibs/${abi}/libkokoro_tts_jni.so")
+    def out = layout.buildDirectory.file("kokoroJni/${abi}/libkokoro_tts_jni.so").get().asFile
+    outputs.file(out)
+    doLast {
+        if (local.exists()) { out.delete(); println "fetchKokoroJni: using local ${local}"; return }
+        if (!url) { out.delete(); println "fetchKokoroJni: no kokoroJni.url set; the app will use the MediaPipe task"; return }
+        def digest = { File f -> f.exists() ? java.security.MessageDigest.getInstance("SHA-256").digest(f.bytes).encodeHex().toString() : '' }
+        if (digest(out) == sha) return
+        out.parentFile.mkdirs()
+        println "fetchKokoroJni: downloading ${url}"
+        new URL(url).withInputStream { i -> out.withOutputStream { o -> o << i } }
+        def got = digest(out)
+        if (got != sha) { out.delete(); throw new GradleException("libkokoro_tts_jni.so checksum ${got} does not match kokoroJni.sha256 ${sha}") }
+    }
+}
+
 tasks.configureEach { task ->
     if (task.name.startsWith('cargoBuild')) {
         task.dependsOn extractOnnxLib
@@ -113,6 +138,7 @@ tasks.configureEach { task ->
     }
     if (task.name.startsWith('merge') && (task.name.endsWith('NativeLibs') || task.name.endsWith('JniLibFolders'))) {
         task.dependsOn copyRustLibs
+        task.dependsOn fetchKokoroJni
     }
 }
 
@@ -202,7 +228,7 @@ androidComponents {
 }
 
 afterEvaluate {
-    android.sourceSets.main.jniLibs.setSrcDirs(["src/main/jniLibs", layout.buildDirectory.dir("finalJniLibs").get().asFile.absolutePath])
+    android.sourceSets.main.jniLibs.setSrcDirs(["src/main/jniLibs", layout.buildDirectory.dir("finalJniLibs").get().asFile.absolutePath, layout.buildDirectory.dir("kokoroJni").get().asFile.absolutePath])
 }
 
 kotlin {
