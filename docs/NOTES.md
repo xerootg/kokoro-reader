@@ -44,7 +44,12 @@ What was learned while turning the Supertonic TTS reader into a Kokoro-based aud
   clang works for host builds), `--copt=-DHWY_COMPILE_ONLY_EMU128` on x86 (Highway's AVX-512 code
   does not compile with clang 21), and the LFS prebuilts under `prebuilt/` fetched from
   `media.githubusercontent.com` (the repo uses Git LFS; without git-lfs the files are pointers).
-  Android: `--config=android_arm64` with `ANDROID_NDK_HOME` set.
+  Android: `--config=android_arm64` with `ANDROID_NDK_HOME` set (x86_64 for the emulator the same
+  way, plus the Highway flag). Strip with the NDK's `llvm-strip --strip-unneeded` (51 MB -> 25 MB).
+- Verified in the emulator (2026-11-14): the app loads `libkokoro_tts_jni.so`, creates the 512-token
+  engine in about 1.2 s, and speaks each sentence of the test text as one piece (197 and 124
+  characters). When the direct path is available the MediaPipe task is not created at all unless the
+  speed is changed from 1.0, which saves 2 s and about 200 MB.
 
 ## Text handling in the app (`KokoroEngine.pieces`)
 
