@@ -134,7 +134,7 @@ object KokoroEngine {
         val model = modelFileFor(onnxDir)
         if ((tts != null || taskDeferred) && loadedModel == model.absolutePath && abs(loadedRate - speakingRate) < 0.01f) return true
         release()
-        if (abs(speakingRate - 1.0f) < 0.01f && KokoroNative.available && longModelFor(model.absolutePath) != null) {
+        if (KokoroNative.available && longModelFor(model.absolutePath) != null) {
             // The direct path will do the work; the MediaPipe task (2 s, ~200 MB) is only made if ever needed.
             loadedModel = model.absolutePath; loadedRate = speakingRate; taskDeferred = true
             Log.i(TAG, "Kokoro: direct path available, MediaPipe task deferred")
@@ -197,9 +197,10 @@ object KokoroEngine {
         return listOf(LONG_MODEL_GPU, LONG_MODEL_CPU).map { File(dir, it) }.firstOrNull { it.exists() && it.length() > 0 }
     }
 
-    /** True when whole sentences can go through the direct binding: library packaged, long model present, speed 1.0. */
+    /** True when whole sentences can go through the direct binding: library packaged and long model present.
+     *  Speed is applied afterwards by [TimeStretch], so it does not matter here. */
     fun longPathAvailable(modelPath: String?, speed: Float): Boolean =
-        modelPath != null && abs(speed - 1.0f) < 0.01f && KokoroNative.available && longModelFor(modelPath) != null
+        modelPath != null && KokoroNative.available && longModelFor(modelPath) != null
 
     /** Create (or re-create for a new voice) the direct engine. Returns false if it could not be made. */
     @Synchronized
@@ -276,7 +277,8 @@ object KokoroEngine {
         val started = android.os.SystemClock.elapsedRealtime()
         val modelName = if (direct) longModel!!.name else File(modelPath).name
         for ((piece, gap) in cut) {
-            val key = AudioCache.key(modelName, voice, loadedRate, piece)
+            // The direct path always synthesises at normal speed and stretches afterwards, so its cache is speed-free.
+            val key = AudioCache.key(modelName, voice, if (direct) 1.0f else loadedRate, piece)
             var speech: ByteArray? = AudioCache.get(key)          // trimmed PCM without the gap
             if (speech != null) cached++ else {
                 val tp = android.os.SystemClock.elapsedRealtime()
@@ -296,8 +298,9 @@ object KokoroEngine {
                 speech = b.array()
                 AudioCache.put(key, speech)
             }
+            val played = if (direct && abs(speed - 1.0f) >= 0.01f) stretchPcm(speech, speed) else speech
             val gapBytes = (gap * SAMPLE_RATE).toInt().coerceAtLeast(0) * 2
-            val out = if (gapBytes == 0) speech else speech.copyOf(speech.size + gapBytes)   // zeros = silence
+            val out = if (gapBytes == 0) played else played.copyOf(played.size + gapBytes)   // zeros = silence
             total += out.size / 2; delivered++
             onPiece(out)
         }
@@ -410,6 +413,18 @@ object KokoroEngine {
         flush(0f)
         if (out.isNotEmpty()) out[out.size - 1] = out.last().first to 0f
         return out
+    }
+
+    /** Speed change for the direct path (16-bit PCM in and out), pitch preserved. */
+    private fun stretchPcm(pcm: ByteArray, speed: Float): ByteArray {
+        val n = pcm.size / 2
+        val f = FloatArray(n)
+        val inBuf = ByteBuffer.wrap(pcm).order(ByteOrder.LITTLE_ENDIAN)
+        for (i in 0 until n) f[i] = inBuf.getShort(i * 2) / 32768f
+        val s = com.brahmadeo.supertonic.tts.utils.TimeStretch.stretch(f, speed, SAMPLE_RATE)
+        val outBuf = ByteBuffer.allocate(s.size * 2).order(ByteOrder.LITTLE_ENDIAN)
+        for (v in s) outBuf.putShort((v.coerceIn(-1f, 1f) * 32767f).toInt().toShort())
+        return outBuf.array()
     }
 
     /** Remove the silence the model puts around an utterance, keeping a short margin. */

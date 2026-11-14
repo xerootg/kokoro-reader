@@ -10,9 +10,8 @@ import android.util.Log
  * sentence is spoken as several utterances. Through this binding the chunk size is ours to set, and
  * with a model exported for 512 phoneme tokens a whole sentence or paragraph is one run.
  *
- * Not available through this path yet: speaking rate (the model has no speed input; MediaPipe
- * time-stretches in its wrapper), so the engine falls back to the MediaPipe task when the user's
- * speed is not 1.0.
+ * The model has no speed input, so speaking rate on this path is a time-stretch applied after
+ * synthesis (utils/TimeStretch.kt); speech is cached at normal speed.
  */
 object KokoroNative {
     private const val TAG = "KokoroNative"
