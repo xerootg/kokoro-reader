@@ -59,8 +59,14 @@ What was learned while turning the Supertonic TTS reader into a Kokoro-based aud
   collapsed to its word) there; longer pieces go to the 512 engine. If a short piece ever exceeds
   128 tokens the runtime slices it as before, so nothing fails. The cache key names the bundle that
   made the piece. Emulator (CPU, 2026-11-14): short pieces 2.6 s each against 13.1 s for a 181-character
-  piece on the 512 bundle; the second engine added 187 MB of native heap. On the phone's GPU the
-  short run should be about 1 s against 4.6 s; measure when it is next attached.
+  piece on the 512 bundle; the second engine added 187 MB of native heap. Pixel 10a GPU
+  (2026-11-14, bench driving the TTS service, voice am_michael): short pieces of 13-39 characters
+  took 0.9-1.1 s each (1.8-3.1 s of speech), the 179- and 222-character pieces 4.9 s and 5.2 s on
+  the 512 engine; a 265-character passage of five pieces came out in 9.0 s for 18.2 s of speech,
+  against about 23 s had every piece gone to the 512 engine. The stock bundle's direct engine took
+  3.1 s to load (the 512 one 1.2 s in the same run). Memory with both engines: 964 MB PSS resident
+  plus 244 MB swapped (the second engine's native heap is what sits in swap), against about 950 MB
+  with the 512 engine alone.
 
 ## Text handling in the app (`KokoroEngine.pieces`)
 
